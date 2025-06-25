@@ -1,0 +1,55 @@
+package com.dd3ok.whoamai.infrastructure.adapter.out.gemini
+
+import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.google.genai.Client
+import com.google.genai.types.Content
+import com.google.genai.types.GenerateContentConfig
+import com.google.genai.types.Part
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.stereotype.Component
+
+@Component
+class GeminiAdapter(
+    @Value("\${gemini.api.key}") private val apiKey: String,
+    @Value("\${gemini.model.name}") private val modelName: String,
+    @Value("\${gemini.system.instruction:#{null}}") private val systemInstruction: String?
+) : GeminiPort {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
+
+    private val client: Client by lazy {
+        logger.info("Initializing Google Gen AI Client...")
+        Client.builder()
+            .apiKey(apiKey)
+            .build()
+    }
+
+    private val generationConfig: GenerateContentConfig by lazy {
+        val systemInstruction: Content? = Content.fromParts(Part.fromText(systemInstruction))
+        GenerateContentConfig.builder()
+            .maxOutputTokens(4096)
+            .temperature(0.5f)
+            .systemInstruction(systemInstruction)
+            .build()
+    }
+
+    override suspend fun generateStreamingContent(prompt: String): Flow<String> {
+        return try {
+            val responseStream = client.models
+                .generateContentStream(modelName, prompt, generationConfig)
+
+            flow {
+                for (response in responseStream) {
+                    response.text()?.let { emit(it) }
+                }
+            }
+        } catch (e: Exception) {
+            logger.error("Error while calling Gemini API: ${e.message}", e)
+            flowOf("죄송합니다, AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
+        }
+    }
+}
