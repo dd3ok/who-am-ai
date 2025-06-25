@@ -32,7 +32,7 @@ class GeminiAdapter(
         val systemInstruction: Content? = Content.fromParts(Part.fromText(systemInstruction))
         GenerateContentConfig.builder()
             .maxOutputTokens(4096)
-            .temperature(0.5f)
+            .temperature(0.75f)
             .systemInstruction(systemInstruction)
             .build()
     }
