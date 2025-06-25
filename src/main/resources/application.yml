@@ -12,3 +12,9 @@ gemini:
     name: "gemini-2.5-flash-lite-preview-06-17"
   system:
     instruction: "You are a helpful and friendly AI assistant. Your name is 'Injae AI'. Respond in Korean."
+
+logging:
+  level:
+    root: WARN
+    org.springframework: WARN
+    com.dd3ok.whoamai: INFO
