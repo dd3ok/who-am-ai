@@ -37,10 +37,10 @@ class GeminiAdapter(
             .build()
     }
 
-    override suspend fun generateStreamingContent(prompt: String): Flow<String> {
+    override suspend fun generateChatContent(history: List<Content>): Flow<String> {
         return try {
             val responseStream = client.models
-                .generateContentStream(modelName, prompt, generationConfig)
+                .generateContentStream(modelName, history, generationConfig)
 
             flow {
                 for (response in responseStream) {
@@ -50,6 +50,17 @@ class GeminiAdapter(
         } catch (e: Exception) {
             logger.error("Error while calling Gemini API: ${e.message}", e)
             flowOf("죄송합니다, AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
+        }
+    }
+
+    override suspend fun summerizeContent(prompt: String): String {
+        return try {
+            val response = client.models.generateContent(modelName, prompt, generationConfig)
+            response.text() ?: ""
+        } catch (e: Exception) {
+            logger.error("Error while calling Gemini API for summarization: ${e.message}", e)
+            // 요약에 실패하면 빈 문자열을 반환하여 전체 프로세스가 멈추지 않도록 함
+            ""
         }
     }
 }

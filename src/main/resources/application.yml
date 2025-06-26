@@ -2,6 +2,10 @@ spring:
   application:
     name: who-am-ai
 
+  data:
+    mongodb:
+      uri: ${MONGO_URI}
+
 server:
   port: 8080
 

@@ -31,6 +31,9 @@ dependencies {
     // Gemini
     implementation("com.google.genai:google-genai:1.5.0")
 
+    // DB
+    implementation("org.springframework.boot:spring-boot-starter-data-mongodb-reactive")
+
     // test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.projectreactor:reactor-test")
