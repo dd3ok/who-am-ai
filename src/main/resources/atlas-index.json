@@ -1,0 +1,22 @@
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "content_embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "chunk_type"
+    },
+    {
+      "type": "filter",
+      "path": "company"
+    },
+    {
+      "type": "filter",
+      "path": "skills"
+    }
+  ]
+}

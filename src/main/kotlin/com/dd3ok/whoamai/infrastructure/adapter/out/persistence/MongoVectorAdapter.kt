@@ -9,10 +9,10 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.aggregation.Aggregation
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation
+import org.springframework.data.mongodb.core.findById
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
-import kotlin.jvm.java
 
 @Component
 class MongoVectorAdapter(
@@ -25,65 +25,77 @@ class MongoVectorAdapter(
     companion object {
         const val COLLECTION_NAME = "resume_chunks"
         const val VECTOR_INDEX_NAME = "vector_index"
+        private const val NUM_CANDIDATES_MULTIPLIER = 10
     }
 
-    // Improved indexResume: Returns the count of indexed documents, using coroutines bridge
-    override suspend fun indexResume(sections: Map<String, String>): Int {
+    override suspend fun indexResume(chunks: List<ResumeChunk>): Int {
         return mongoTemplate.dropCollection(ResumeChunkDocument::class.java)
             .thenMany(
-                Flux.fromIterable(sections.entries)
-                    .flatMap { (id, content) ->
-                        mono {
-                            embeddingPort.embedContent(content)
-                        }.map { embedding ->
-                            ResumeChunkDocument(id, content, embedding)
-                        }
-                            .doOnError { error ->
-                                logger.error("Failed to create embedding for section: $id. Skipping.", error)
+                Flux.fromIterable(chunks)
+                    .flatMap { chunk ->
+                        mono { embeddingPort.embedContent(chunk.content) }
+                            .map { embedding ->
+                                ResumeChunkDocument(
+                                    id = chunk.id,
+                                    type = chunk.type,
+                                    content = chunk.content,
+                                    contentEmbedding = embedding,
+                                    company = chunk.company,
+                                    skills = chunk.skills,
+                                    source = chunk.source
+                                )
                             }
+                            .doOnError { error -> logger.error("Failed to create embedding for chunk: ${chunk.id}. Skipping.", error) }
                             .onErrorResume { Mono.empty() }
                     }
             )
             .collectList()
-            .flatMap { chunks ->
-                if (chunks.isNotEmpty()) {
-                    mongoTemplate.insertAll(chunks).then(Mono.just(chunks.size))
+            .flatMap { documents ->
+                if (documents.isNotEmpty()) {
+                    mongoTemplate.insertAll(documents).then(Mono.just(documents.size))
                 } else {
                     Mono.just(0)
                 }
             }
             .doOnSuccess { indexedCount ->
-                logger.info("Successfully indexed $indexedCount resume sections into MongoDB Atlas.")
+                logger.info("Successfully indexed $indexedCount resume chunks into MongoDB Atlas.")
             }
-            .awaitSingle() // awaitSingle는 값이 항상 있으므로, emptyList가 아니면 문제없음
-        // (문제 상황에서는 예외가 발생함. 좀더 보수적이려면 awaitSingleOrNull() + ?: 0 도 OK)
+            .awaitSingle()
     }
 
-    override suspend fun searchSimilarResumeSections(query: String, topK: Int): List<String> {
+    override suspend fun searchSimilarResumeSections(query: String, topK: Int, filter: Document?): List<String> {
+        // 이 메소드는 변경 없음 (그대로 유지)
         val queryEmbedding = embeddingPort.embedContent(query)
-
+        if (queryEmbedding.isEmpty()) {
+            logger.warn("Query embedding failed. Returning empty search results.")
+            return emptyList()
+        }
         val vectorSearchStage = Aggregation.stage(
-            Document(
-                "\$vectorSearch",
+            Document("\$vectorSearch",
                 Document("index", VECTOR_INDEX_NAME)
-                    .append("path", "contentEmbedding")
+                    .append("path", "content_embedding")
                     .append("queryVector", queryEmbedding)
-                    .append("numCandidates", (topK * 10).toLong())
+                    .append("numCandidates", (topK * NUM_CANDIDATES_MULTIPLIER).toLong())
                     .append("limit", topK.toLong())
+                    .apply { filter?.let { append("filter", it) } }
             )
         )
-
-        val projectStage = Aggregation.project("content").andExclude("_id")
-
+        val projectStage = Aggregation.project("content_text").andExclude("_id")
         val aggregation: TypedAggregation<ResumeChunkDocument> = Aggregation.newAggregation(
             ResumeChunkDocument::class.java,
             vectorSearchStage,
             projectStage
         )
-
         return mongoTemplate.aggregate(aggregation, COLLECTION_NAME, Document::class.java)
-            .mapNotNull { it.getString("content") }
+            .mapNotNull { it.getString("content_text") }
             .collectList()
             .awaitSingleOrNull() ?: emptyList()
+    }
+
+    // --- [신규] ID로 직접 문서를 찾는 메소드 구현 ---
+    override suspend fun findChunkById(id: String): String? {
+        return mongoTemplate.findById<ResumeChunkDocument>(id)
+            .map { it.content }
+            .awaitSingleOrNull()
     }
 }

@@ -1,6 +1,9 @@
 package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
 
+import org.bson.Document
+
 interface VectorDBPort {
-    suspend fun indexResume(sections: Map<String, String>): Int
-    suspend fun searchSimilarResumeSections(query: String, topK: Int): List<String>
+    suspend fun indexResume(chunks: List<ResumeChunk>): Int
+    suspend fun searchSimilarResumeSections(query: String, topK: Int, filter: Document? = null): List<String>
+    suspend fun findChunkById(id: String): String?
 }

@@ -1,0 +1,142 @@
+{
+  "name": "유인재",
+  "summary": "7년 경력의 Spring Boot 기반 백엔드 서비스 개발자. 확장 가능한 시스템 설계, 클린코드, 효율적 소통을 중시하며, 최근 AI, MSA, 클라우드 환경과 문제 해결 및 기술 토론에 깊은 관심을 두고 있습니다.",
+  "blog": "https://yangori.tistory.com",
+  "mbti": "INFP",
+  "skills": [
+    "Spring Boot", "Spring Framework", "JPA", "Node.js", ".NET",
+    "React", "Next.js", "Vue", "jQuery", "JSP", "HTML",
+    "SQL Server", "Oracle", "Redis",
+    "Kafka", "Docker", "Git",
+    "Java", "JavaScript", "TypeScript", "SQL"
+  ],
+  "certificates": [
+    {
+      "title": "SQLD",
+      "issuedAt": "2018-10",
+      "issuer": "한국데이터산업진흥원"
+    },
+    {
+      "title": "정보처리기사",
+      "issuedAt": "2016-07",
+      "issuer": "한국산업인력공단"
+    }
+  ],
+  "education": [
+    {
+      "school": "단국대학교",
+      "major": "소프트웨어",
+      "period": { "start": "2015-03", "end": "2017-02" },
+      "degree": "학사 (편입)"
+    },
+    {
+      "school": "신구대학교",
+      "major": "정보통신",
+      "period": { "start": "2011-03", "end": "2015-02" },
+      "degree": "전문학사"
+    }
+  ],
+  "experiences": [
+    {
+      "company": "지마켓",
+      "aliases": ["G마켓", "Gmarket"],
+      "period": { "start": "2021-10", "end": "2025-01" },
+      "position": "정규직",
+      "tags": ["커머스", "대형플랫폼", "MSA"]
+    },
+    {
+      "company": "미라콤아이앤씨",
+      "aliases": ["미라콤", "Miracom"],
+      "period": { "start": "2018-01", "end": "2021-10" },
+      "position": "정규직",
+      "tags": ["SI", "삼성전자"]
+    }
+  ],
+  "projects": [
+    {
+      "title": "ESM 셀러딜 신청 프로세스 개선",
+      "company": "지마켓",
+      "period": { "start": "2024-08", "end": "2024-11" },
+      "skills": ["Spring Boot", "SQL Server", "Vue"],
+      "tags": ["ESM", "관리자페이지", "Capacity", "카테고리담당자", "셀러딜"],
+      "description": "영업 담당자 의견을 반영, 관리자 페이지와 카테고리-담당자 연동 기능 개선. 전체 capacity 및 제한 관리, 담당자 매칭 등 신규 기능 도입."
+    },
+    {
+      "title": "ESM 카테고리 담당자",
+      "company": "지마켓",
+      "period": { "start": "2024-06", "end": "2024-07" },
+      "skills": ["Spring Boot", "SQL Server", "Redis", "Vue"],
+      "tags": ["ESM", "카테고리", "담당자관리", "백엔드", "어드민"],
+      "description": "카테고리 담당자 관리 메뉴 신설 및 매칭/관리 기능 백엔드, 어드민 프론트 개발."
+    },
+    {
+      "title": "ESM 셀러딜 신청 프로세스 - 옥션 올킬 신청",
+      "company": "지마켓",
+      "period": { "start": "2024-02", "end": "2024-04" },
+      "skills": ["Spring Boot", "SQL Server", "Redis", "Next.js", "React"],
+      "tags": ["ESM", "옥션", "올킬", "셀러딜", "프로세스", "프론트엔드", "백엔드"],
+      "description": "셀러가 직접 옥션 올킬을 신청할 수 있는 셀러딜 프로세스를 구축. 프론트엔드와 백엔드 모두 개발."
+    },
+    {
+      "title": "ESM 셀러딜 신청 프로세스 - 지마켓 슈퍼딜 신청",
+      "company": "지마켓",
+      "period": { "start": "2023-09", "end": "2024-01" },
+      "skills": ["Spring Boot", "SQL Server", "Redis", "Next.js", "React"],
+      "tags": ["ESM", "지마켓", "슈퍼딜", "셀러딜", "신청", "백엔드", "프론트엔드"],
+      "description": "지마켓 슈퍼딜 셀러딜 신청, 조회, 검증 등 전반적인 프로세스 백엔드 및 프론트 개발."
+    },
+    {
+      "title": "ESM 로그인 개편",
+      "company": "지마켓",
+      "period": { "start": "2023-03", "end": "2023-08" },
+      "skills": ["Spring Boot", "SQL Server", "Redis", "Kafka"],
+      "tags": ["ESM", "로그인", "인증", "MSA", "마이그레이션"],
+      "description": "MSA 기반 인증 시스템으로 마이그레이션하며 본인·2단계 인증 및 캡챠 내재화, 닷넷→자바 전환, 레거시 리팩토링 수행."
+    },
+    {
+      "title": "판매자 가입 개선",
+      "company": "지마켓",
+      "period": { "start": "2022-09", "end": "2022-12" },
+      "skills": ["Spring Boot", "Spring Batch", "SQL Server"],
+      "tags": ["판매자", "가입", "ESM", "프로세스개선", "배치"],
+      "description": "지마켓, 옥션, ESM 동시가입 및 전체 가입 프로세스 개선, 데이터 연동 API 및 배치 개발."
+    },
+    {
+      "title": "ESM+ 부정 로그인 탐지(ATO) 도입",
+      "company": "지마켓",
+      "period": { "start": "2022-06", "end": "2022-08" },
+      "skills": [".NET", "Spring Boot", "SQL Server", "Redis", "jQuery"],
+      "tags": ["ESM", "보안", "로그인", "탐지", "인터리젠"],
+      "description": "인터리젠 솔루션 도입, 인증 단계별 부정 로그인 탐지 및 개선, 연동 및 보안 향상 담당."
+    },
+    {
+      "title": "삼성전자로지텍 설치지원시스템(BISS) 개편",
+      "company": "미라콤아이앤씨",
+      "period": { "start": "2021-06", "end": "2021-08" },
+      "skills": ["JSP", "jQuery", "Oracle"],
+      "tags": ["로지텍", "설치지원", "레거시", "클린코드", "SI"],
+      "description": "설치기사 현장 발주·품의 관리 시스템 메뉴 개편 및 클린코드화."
+    },
+    {
+      "title": "삼성전자 입찰견적관리시스템(BQMS) – MRO 몰/2.0",
+      "company": "미라콤아이앤씨",
+      "period": { "start": "2018-01", "end": "2021-05" },
+      "skills": ["Spring", "JSP", "jQuery", "Oracle"],
+      "tags": ["삼성전자", "BQMS", "MRO몰", "SI", "구매"],
+      "description": "삼성전자 및 계열사 대상 MRO 자재 구매몰 개발·운영, 주문·정산·현업 시스템 연동, 인터페이스 등 다수 기능 신규 개발 및 개선."
+    }
+  ],
+  "hobbies": [
+    {
+      "category": "게임",
+      "items": ["롤토체스", "마인크래프트", "닌텐도 스위치2 (젤다)"]
+    },
+    {
+      "category": "운동/건강",
+      "items": ["다이어트(최근 13kg 이상 증가로 시작)"]
+    }
+  ],
+  "interests": [
+    "AI 서비스", "MSA", "Cloud", "기술토론"
+  ]
+}
