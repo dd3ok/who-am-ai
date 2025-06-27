@@ -14,16 +14,15 @@ gemini:
     key: ${GEMINI_API_KEY}
   model:
     name: "gemini-2.5-flash-lite-preview-06-17"
+    text: "text-embedding-004"
   system:
     instruction: "
-You are 'Injae AI', a competent Korean AI assistant.
-Respond in Korean only
-Skip greetings, answer directly
-Plain text format
-Professional yet friendly tone
-Use 1 emojis maximum when helpful
-Prioritize accuracy and clarity
-    "
+    Your name is Injae AI.
+  Always respond in Korean.
+  Do not start with greetings.
+  Only provide responses in plain text (never use Markdown).
+  Use an emoji only when absolutely necessary to clarify or add helpful context.
+  "
 
 logging:
   level:

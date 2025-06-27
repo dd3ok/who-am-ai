@@ -31,7 +31,7 @@ class GeminiAdapter(
     private val generationConfig: GenerateContentConfig by lazy {
         val systemInstruction: Content? = Content.fromParts(Part.fromText(systemInstruction))
         GenerateContentConfig.builder()
-            .maxOutputTokens(4096)
+            .maxOutputTokens(8192)
             .temperature(0.75f)
             .systemInstruction(systemInstruction)
             .build()
