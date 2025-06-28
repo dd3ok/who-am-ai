@@ -22,13 +22,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Service
 
-// 3가지 질문 유형을 정의하는 enum 클래스
-enum class QueryType {
-    CHIT_CHAT,            // 간단한 인사, AI 정체성 질문 (대화기록 X, RAG X)
-    GENERAL_CONVERSATION, // 이력서와 무관한 일반 대화 및 후속 질문 (대화기록 O, RAG X)
-    RESUME_RAG            // 이력서 관련 정보 질문 (대화기록 O, RAG O)
-}
-
 @Service
 class ChatService(
     private val geminiPort: GeminiPort,
@@ -44,7 +37,6 @@ class ChatService(
         private const val API_WINDOW_TOKENS = 2048
         private const val SUMMARY_TRIGGER_TOKENS = 4096
         private const val SUMMARY_SOURCE_MESSAGES = 5
-        private const val RESUME_SEARCH_TOP_K = 3
     }
 
     @PostConstruct
@@ -165,30 +157,17 @@ class ChatService(
      */
     private fun classifyQueryType(userPrompt: String): QueryType {
         val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
-
-        // 1. CHIT_CHAT: 간단한 인사나 AI 정체성 질문을 가장 먼저 확인합니다.
-        val chitChatKeywords = listOf(
-            "안녕", "하이", "헬로", "hello", "hi", "반가워", "ㅎㅇ", "안녕하세요", "반갑습니다",
-            "넌누구야", "너는누구니", "whoareyou"
-        )
-        if (chitChatKeywords.any { normalizedQuery.contains(it) }) {
-            logger.info("Query type classified as: CHIT_CHAT")
-            return QueryType.CHIT_CHAT
-        }
-
-        // 2. RESUME_RAG: 이력서와 관련된 명시적인 키워드가 포함되어 있는지 확인합니다.
         val resumeKeywords = listOf(
             "경력", "이력", "회사", "프로젝트", "스킬", "기술", "학력", "학교", "자격증",
-            "mbti", "취미", "관심사", "지마켓", "미라콤", "이력서", "유인재"
+            "mbti", "취미", "관심사", "지마켓", "미라콤", "이력서", this.resume.name.lowercase() // '유인재'를 동적으로 변경
         )
+        // 이력서 키워드가 있으면 RAG, 없으면 모두 NON_RAG
         if (resumeKeywords.any { normalizedQuery.contains(it) } || resume.projects.any { userPrompt.contains(it.title) }) {
             logger.info("Query type classified as: RESUME_RAG")
             return QueryType.RESUME_RAG
         }
-
-        // 3. GENERAL_CONVERSATION: 위 두 경우에 해당하지 않으면 일반 대화로 간주합니다.
-        logger.info("Query type classified as: GENERAL_CONVERSATION")
-        return QueryType.GENERAL_CONVERSATION
+        logger.info("Query type classified as: NON_RAG")
+        return QueryType.NON_RAG
     }
 
     /**
@@ -251,29 +230,17 @@ class ChatService(
 
         // 2. 질문 의도에 따라 대화 기록(pastHistory)과 RAG 컨텍스트(relevantContexts)를 다르게 구성합니다.
         val (pastHistory, relevantContexts) = when (queryType) {
-            QueryType.CHIT_CHAT -> {
-                // 잡담일 경우, AI의 긴 답변(오염원)만 필터링한 '정제된 기록'을 사용합니다.
-                // 이렇게 하면 AI가 정체성 혼란 없이 대화의 흐름을 기억할 수 있습니다.
-                val filteredHistory = domainHistory.history.filter { message ->
-                    // AI(model)가 생성한 답변 중, 일정 길이(예: 150자)를 초과하는 답변만 RAG 결과로 간주하여 제외합니다.
-                    !(message.role == "model" && message.text.length > 150)
-                }
-                val history = createApiHistoryWindow(ChatHistory(domainHistory.userId, filteredHistory))
-                // RAG 컨텍스트는 당연히 비웁니다.
-                Pair(history, emptyList())
-            }
-            QueryType.GENERAL_CONVERSATION -> {
-                // 일반 대화: 전체 대화 기록을 포함하고, RAG 컨텍스트는 비웁니다.
+            QueryType.NON_RAG -> {
                 val history = createApiHistoryWindow(domainHistory)
                 Pair(history, emptyList())
             }
             QueryType.RESUME_RAG -> {
-                // 이력서 질문: 전체 대화 기록과 RAG 컨텍스트를 모두 포함합니다.
                 val history = createApiHistoryWindow(domainHistory)
                 val contexts = retrieveContextsForResumeQuery(userPrompt)
                 Pair(history, contexts)
             }
         }
+
 
         // 3. 구성된 데이터를 기반으로 프롬프트를 생성합니다.
         val apiHistory = if (relevantContexts.isNotEmpty()) {
@@ -313,11 +280,12 @@ class ChatService(
             --- 이력서 정보 ---
             $contextString
             --- 정보 끝 ---
+            
+            질문: $userPrompt
         """.trimIndent()
 
         val contentBuilder = mutableListOf<Content>()
         contentBuilder.addAll(history)
-        contentBuilder.add(Content.fromParts(Part.fromText(userPrompt)))
         contentBuilder.add(Content.fromParts(Part.fromText(ragContextPrompt )))
         return contentBuilder
     }

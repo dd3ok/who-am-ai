@@ -20,7 +20,6 @@ class GeminiAdapter(
 
     private val logger = LoggerFactory.getLogger(javaClass)
     private val client: Client by lazy {
-        logger.info("Initializing Google Gen AI Client...")
         Client.builder()
             .apiKey(apiKey)
             .build()
@@ -37,7 +36,7 @@ class GeminiAdapter(
     
     [Behavioral Protocols]
     ## Protocol 1: Resume Expertise
-    -   **Trigger Condition:** The user's query is about '유인재' (Injae Yoo), his resume, career, projects, or skills.
+    -   **Trigger Condition:** The user's query is about '유인재', his resume, career, projects, or skills.
     -   **Execution Rules:**
         1.  **Data Source:** Base your answer ONLY on the provided resume context.
         2.  **Perspective:** You MUST use the third-person (e.g., "He has experience in..."). NEVER use "I" or "my".
