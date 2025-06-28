@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.port.out.EmbeddingPort
+import com.dd3ok.whoamai.application.port.out.VectorDBPort
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.mono
@@ -64,7 +65,6 @@ class MongoVectorAdapter(
     }
 
     override suspend fun searchSimilarResumeSections(query: String, topK: Int, filter: Document?): List<String> {
-        // 이 메소드는 변경 없음 (그대로 유지)
         val queryEmbedding = embeddingPort.embedContent(query)
         if (queryEmbedding.isEmpty()) {
             logger.warn("Query embedding failed. Returning empty search results.")
@@ -80,19 +80,20 @@ class MongoVectorAdapter(
                     .apply { filter?.let { append("filter", it) } }
             )
         )
-        val projectStage = Aggregation.project("content_text").andExclude("_id")
+        val projectStage = Aggregation.project("content").andExclude("_id")
+
         val aggregation: TypedAggregation<ResumeChunkDocument> = Aggregation.newAggregation(
             ResumeChunkDocument::class.java,
             vectorSearchStage,
             projectStage
         )
+
         return mongoTemplate.aggregate(aggregation, COLLECTION_NAME, Document::class.java)
-            .mapNotNull { it.getString("content_text") }
+            .mapNotNull { it.getString("content") }
             .collectList()
             .awaitSingleOrNull() ?: emptyList()
     }
 
-    // --- [신규] ID로 직접 문서를 찾는 메소드 구현 ---
     override suspend fun findChunkById(id: String): String? {
         return mongoTemplate.findById<ResumeChunkDocument>(id)
             .map { it.content }

@@ -15,14 +15,6 @@ gemini:
   model:
     name: "gemini-2.5-flash-lite-preview-06-17"
     text: "text-embedding-004"
-  system:
-    instruction: "
-    Your name is Injae AI.
-  Always respond in Korean.
-  Do not start with greetings.
-  Only provide responses in plain text (never use Markdown).
-  Use an emoji only when absolutely necessary to clarify or add helpful context.
-  "
 
 logging:
   level:
