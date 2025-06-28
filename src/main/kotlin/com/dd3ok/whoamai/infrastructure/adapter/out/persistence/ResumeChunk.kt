@@ -5,6 +5,6 @@ data class ResumeChunk(
     val type: String,
     val content: String,
     val company: String? = null,
-    val skills: List<String> = emptyList(),
+    val skills: List<String>? = null,
     val source: Map<String, Any>
 )

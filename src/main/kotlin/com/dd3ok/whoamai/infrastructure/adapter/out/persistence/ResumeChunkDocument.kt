@@ -22,7 +22,7 @@ data class ResumeChunkDocument(
     val company: String? = null,
 
     @Field("skills")
-    val skills: List<String> = emptyList(),
+    val skills: List<String>? = emptyList(),
 
     @Field("source_data")
     val source: Map<String, Any>

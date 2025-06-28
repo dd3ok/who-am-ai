@@ -1,7 +1,6 @@
 package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.port.out.EmbeddingPort
-import com.dd3ok.whoamai.application.port.out.VectorDBPort
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.reactor.mono

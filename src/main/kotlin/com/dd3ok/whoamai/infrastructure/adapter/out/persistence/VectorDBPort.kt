@@ -1,6 +1,5 @@
-package com.dd3ok.whoamai.application.port.out
+package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
 
-import com.dd3ok.whoamai.infrastructure.adapter.out.persistence.ResumeChunk
 import org.bson.Document
 
 interface VectorDBPort {
