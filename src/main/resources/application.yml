@@ -19,5 +19,5 @@ gemini:
 logging:
   level:
     root: WARN
-    org.springframework: WARN
-    com.dd3ok.whoamai: INFO
+    org.springframework: debug
+    com.dd3ok.whoamai: debug
