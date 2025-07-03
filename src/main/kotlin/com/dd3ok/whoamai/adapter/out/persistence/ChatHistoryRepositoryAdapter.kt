@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
+package com.dd3ok.whoamai.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.domain.ChatHistory
@@ -10,6 +10,7 @@ class ChatHistoryRepositoryAdapter(
 ) : ChatHistoryRepository {
 
     private fun ChatHistoryDocument.toDomain() = ChatHistory(this.userId, this.messages)
+
     private fun ChatHistory.toEntity() = ChatHistoryDocument(this.userId, this.history.toMutableList())
 
     override suspend fun findByUserId(userId: String): ChatHistory? {

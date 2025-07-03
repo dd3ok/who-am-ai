@@ -1,6 +1,8 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.gemini
+package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.config.GeminiModelProperties
+import com.dd3ok.whoamai.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.google.genai.Client
 import com.google.genai.types.Content
@@ -16,29 +18,23 @@ import org.springframework.stereotype.Component
 @Component
 class GeminiAdapter(
     @Value("\${gemini.api.key}") private val apiKey: String,
-    @Value("\${gemini.model.name}") private val modelName: String
+    private val modelProperties: GeminiModelProperties,
+    private val promptProperties: PromptProperties,
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
+
     private val client: Client by lazy {
         Client.builder()
             .apiKey(apiKey)
             .build()
     }
-    private val systemInstruction = """
-    [Core Identity]
-    - Your name is '인재 AI'.
-    - Your role is a professional and helpful AI assistant with a friendly and clear tone.
-    - You may use Markdown and appropriate emojis for clarity.
-    [Primary Directive]
-    You will receive a specific 'Behavioral Protocol' within each user message. You MUST strictly follow the rules of the protocol provided in that message for your response.
-    """.trimIndent()
 
     private val generationConfig: GenerateContentConfig by lazy {
         GenerateContentConfig.builder()
-            .maxOutputTokens(8192)
-            .temperature(0.75f)
-            .systemInstruction(Content.fromParts(Part.fromText(systemInstruction)))
+            .maxOutputTokens(modelProperties.maxOutputTokens)
+            .temperature(modelProperties.temperature)
+            .systemInstruction(Content.fromParts(Part.fromText(promptProperties.systemInstruction)))
             .build()
     }
 
@@ -50,10 +46,9 @@ class GeminiAdapter(
                 .build()
         }
 
-
         return try {
             val responseStream = client.models
-                .generateContentStream(modelName, apiHistory, generationConfig)
+                .generateContentStream(modelProperties.name, apiHistory, generationConfig)
 
             flow {
                 for (response in responseStream) {
@@ -68,11 +63,10 @@ class GeminiAdapter(
 
     override suspend fun summerizeContent(prompt: String): String {
         return try {
-            val response = client.models.generateContent(modelName, prompt, generationConfig)
+            val response = client.models.generateContent(modelProperties.name, prompt, generationConfig)
             response.text() ?: ""
         } catch (e: Exception) {
             logger.error("Error while calling Gemini API for summarization: ${e.message}", e)
-            // 요약에 실패하면 빈 문자열을 반환하여 전체 프로세스가 멈추지 않도록 함
             ""
         }
     }

@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.`in`.web
+package com.dd3ok.whoamai.adapter.`in`.web
 
 import com.dd3ok.whoamai.application.port.`in`.ManageResumeUseCase
 import org.springframework.http.ResponseEntity

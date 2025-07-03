@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
+package com.dd3ok.whoamai.adapter.out.persistence
 
 import org.bson.Document
 

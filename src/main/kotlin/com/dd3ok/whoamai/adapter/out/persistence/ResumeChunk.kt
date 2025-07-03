@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
+package com.dd3ok.whoamai.adapter.out.persistence
 
 data class ResumeChunk(
     val id: String,

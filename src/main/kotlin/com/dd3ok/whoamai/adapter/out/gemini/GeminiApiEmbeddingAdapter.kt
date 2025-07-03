@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.gemini
+package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.EmbeddingPort
 import com.google.genai.Client

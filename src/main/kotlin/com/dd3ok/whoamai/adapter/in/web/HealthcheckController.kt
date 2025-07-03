@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.`in`.web
+package com.dd3ok.whoamai.adapter.`in`.web
 
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping

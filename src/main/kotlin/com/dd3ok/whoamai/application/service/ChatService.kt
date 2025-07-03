@@ -6,8 +6,9 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.QueryType
-import com.dd3ok.whoamai.domain.ChatMessage
+import com.dd3ok.whoamai.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatHistory
+import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onCompletion
@@ -20,7 +21,8 @@ class ChatService(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
     private val resumePersistencePort: ResumePersistencePort,
-    private val resumeProviderPort: ResumeProviderPort
+    private val resumeProviderPort: ResumeProviderPort,
+    private val promptProperties: PromptProperties
 ) : ChatUseCase {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -36,25 +38,22 @@ class ChatService(
         val userPrompt = message.content
 
         val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
-        domainHistory.history.forEach { msg -> logger.info("  - Role: ${msg.role}, Text: ${msg.text.take(50)}...") }
 
-        val pastApiHistory = createApiHistoryWindow(domainHistory)
+        val pastHistory = createApiHistoryWindow(domainHistory)
 
         val queryType = classifyQueryType(userPrompt)
 
-        val finalApiHistory = if (queryType == QueryType.RESUME_RAG) {
+        val finalHistory = if (queryType == QueryType.RESUME_RAG) {
             logger.info("Query classified as RESUME_RAG. Retrieving context...")
-            // RAG 의도일 때만 컨텍스트를 검색합니다.
             val relevantContexts = retrieveContextsForRagQuery(userPrompt)
-            createRagPrompt(pastApiHistory, userPrompt, relevantContexts)
+            createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
             logger.info("Query classified as NON_RAG. Proceeding with conversational prompt.")
-            // 일반 대화 의도일 때는 컨텍스트 검색을 아예 실행하지 않습니다.
-            createConversationalPrompt(pastApiHistory, userPrompt)
+            createConversationalPrompt(pastHistory, userPrompt)
         }
 
         val modelResponseBuilder = StringBuilder()
-        return geminiPort.generateChatContent(finalApiHistory)
+        return geminiPort.generateChatContent(finalHistory)
             .onEach { chunk -> modelResponseBuilder.append(chunk) }
             .onCompletion { cause ->
                 if (cause == null) {
@@ -72,107 +71,74 @@ class ChatService(
     }
 
     /**
-     * [RAG 트랙] 컨텍스트가 있을 때 사용하는 엄격한 프롬프트.
-     * 사실 기반 답변과 환각 방지에 초점을 맞춘다.
+     * RAG 프롬프트를 생성합니다. 외부 설정 파일의 템플릿을 사용합니다.
      */
     private fun createRagPrompt(history: List<ChatMessage>, userPrompt: String, contexts: List<String>): List<ChatMessage> {
         val contextString = contexts.joinToString("\n---\n")
-
-        val finalUserPrompt = """
-            # Behavioral Protocol: Resume Expertise
-            ## Execution Rules
-            1.  **Perspective**: Answer from a third-person perspective (e.g., "He has...").
-            2.  **Data Source**: Base your answer STRICTLY and ONLY on the 'Context' section.
-            3.  **Out-of-Scope**: If the 'Context' lacks the info, reply ONLY with: '그 부분에 대한 정보는 없습니다.'
-
-            ---
-            # Context
-            $contextString
-
-            ---
-            # User's Question
-            $userPrompt
-        """.trimIndent()
+        val finalUserPrompt = promptProperties.ragTemplate
+            .replace("{context}", contextString)
+            .replace("{question}", userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
     /**
-     * [일반 대화 트랙]
+     * 일반 대화 프롬프트를 생성합니다. 외부 설정 파일의 템플릿을 사용합니다.
      */
     private fun createConversationalPrompt(history: List<ChatMessage>, userPrompt: String): List<ChatMessage> {
-        val finalUserPrompt = """
-        # Behavioral Protocol: General Conversation
-        
-        ## Primary Goal for THIS turn
-        Your most important task is to understand the user's LATEST message and respond to it directly and naturally.
-        - **If the user is introducing themselves, your ONLY goal is to acknowledge their name warmly.**
-        - **If the user asks a question, answer it.**
-        - **If the user is making small talk, respond in kind.**
-        
-        ## General Rules
-        - Act as a friendly and helpful AI assistant named '인재 AI'.
-        - Remember details from the conversation history to maintain context.
-        - You MUST NOT mention '유인재' or his resume unless the user asks about him.
-
-        ---
-        # User's LATEST Message
-        $userPrompt
-    """.trimIndent()
+        val finalUserPrompt = promptProperties.conversationalTemplate
+            .replace("{question}", userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
+    /**
+     * 규칙 기반으로 컨텍스트를 검색하는 로직입니다.
+     */
     private suspend fun retrieveContextsForRagQuery(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
-        if (listOf("누구야", "누구세요", "소개", "너는누구", "자기소개", resume.name.lowercase()).any { normalizedQuery.contains(it) }) {
-            return resumePersistencePort.findContentById("summary")?.let { listOf(it) } ?: emptyList()
-        }
-        val matchedProject = resume.projects.find { proj -> userPrompt.contains(proj.title) }
+
+        // 규칙 리스트 정의
+        val rules = listOf(
+            { q: String -> if (listOf("누구야", "누구세요", "소개", "자기소개", resume.name.lowercase()).any { q.contains(it) }) "summary" else null },
+            { q: String -> if (listOf("총 경력", "총경력", "전체경력").any { q.contains(it) }) "experience_total_summary" else null },
+            { q: String -> if (listOf("프로젝트", "project").any { q.contains(it) }) "projects" else null },
+            { q: String -> if (listOf("경력", "이력", "회사").any { q.contains(it) }) "experiences" else null },
+            { q: String -> if (listOf("자격증", "certificate").any { q.contains(it) }) "certificates" else null },
+            { q: String -> if (listOf("관심사", "interest").any { q.contains(it) }) "interests" else null },
+            { q: String -> if (listOf("기술", "스킬", "스택").any { q.contains(it) }) "skills" else null },
+            { q: String -> if (listOf("학력", "학교", "대학").any { q.contains(it) }) "education" else null },
+            { q: String -> if (listOf("mbti", "성격").any { q.contains(it) }) "mbti" else null },
+            { q: String -> if (listOf("취미", "여가시간").any { q.contains(it) }) "hobbies" else null }
+        )
+
+        // 특정 프로젝트 제목이 포함되었는지 확인
+        val matchedProject = resume.projects.find { userPrompt.contains(it.title) }
         if (matchedProject != null) {
             logger.info("Topic detected: Specific Project ('${matchedProject.title}').")
             val projectId = "project_${matchedProject.title.replace(Regex("\\s+"), "_")}"
             return resumePersistencePort.findContentById(projectId)?.let { listOf(it) } ?: emptyList()
         }
-        if (listOf("프로젝트", "project", "수행과제").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: General Projects.")
-            return resume.projects.mapNotNull { proj -> resumePersistencePort.findContentById("project_${proj.title.replace(Regex("\\s+"), "_")}") }
-        }
-        if (listOf("총 경력", "총경력", "전체경력").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Total Experience.")
-            return resumePersistencePort.findContentById("experience_total_summary")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("경력", "이력", "회사").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: General Experience.")
-            return resume.experiences.mapNotNull { exp -> resumePersistencePort.findContentById("experience_${exp.company.replace(" ", "_")}") }
-        }
-        if (listOf("자격증", "certificate", "sqld", "정보처리기사").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Certificates.")
-            return resumePersistencePort.findContentById("certificates")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("관심사", "관심", "interest").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Interests.")
-            return resumePersistencePort.findContentById("interests")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("기술", "스킬", "스택").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Skills.")
-            return resumePersistencePort.findContentById("skills")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("학력", "학교", "전공", "대학", "대학교").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Education.")
-            return resumePersistencePort.findContentById("education")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("mbti", "성격").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: MBTI.")
-            return resumePersistencePort.findContentById("mbti")?.let { listOf(it) } ?: emptyList()
-        }
-        if (listOf("취미", "쉴때", "여가시간").any { normalizedQuery.contains(it) }) {
-            logger.info("Topic detected: Hobbies.")
-            return resumePersistencePort.findContentById("hobbies")?.let { listOf(it) } ?: emptyList()
+
+        // 규칙 리스트 순회
+        for (rule in rules) {
+            val chunkId = rule(normalizedQuery)
+            if (chunkId != null) {
+                logger.info("Topic detected by rule: $chunkId")
+                // 'projects' 또는 'experiences'와 같이 복수형 컨텍스트 처리
+                if (chunkId == "projects") {
+                    return resume.projects.mapNotNull { proj -> resumePersistencePort.findContentById("project_${proj.title.replace(Regex("\\s+"), "_")}") }
+                }
+                if (chunkId == "experiences") {
+                    return resume.experiences.mapNotNull { exp -> resumePersistencePort.findContentById("experience_${exp.company.replace(" ", "_")}") }
+                }
+                // 단일 컨텍스트 처리
+                return resumePersistencePort.findContentById(chunkId)?.let { listOf(it) } ?: emptyList()
+            }
         }
 
-        // 최종 단계: 벡터 검색
+        // 규칙에 매칭되지 않으면 벡터 검색 수행
         logger.info("No specific rules matched. Performing general vector search as a fallback.")
         return resumePersistencePort.searchSimilarSections(userPrompt, topK = 3)
     }

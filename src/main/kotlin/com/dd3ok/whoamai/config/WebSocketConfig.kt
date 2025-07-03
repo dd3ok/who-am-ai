@@ -1,6 +1,6 @@
-package com.dd3ok.whoamai.infrastructure.config
+package com.dd3ok.whoamai.config
 
-import com.dd3ok.whoamai.infrastructure.adapter.`in`.web.StreamChatWebSocketHandler
+import com.dd3ok.whoamai.adapter.`in`.web.StreamChatWebSocketHandler
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.HandlerMapping

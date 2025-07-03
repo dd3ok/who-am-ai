@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.config
+package com.dd3ok.whoamai.config
 
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.config.CorsRegistry

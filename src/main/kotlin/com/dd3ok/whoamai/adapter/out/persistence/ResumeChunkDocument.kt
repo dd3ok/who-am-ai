@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.out.persistence
+package com.dd3ok.whoamai.adapter.out.persistence
 
 import org.springframework.data.annotation.Id
 import org.springframework.data.mongodb.core.mapping.Document

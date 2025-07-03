@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.infrastructure.adapter.`in`.web
+package com.dd3ok.whoamai.adapter.`in`.web
 
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.domain.StreamMessage
@@ -8,6 +8,7 @@ import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.mono
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.socket.WebSocketHandler
 import org.springframework.web.reactive.socket.WebSocketSession
@@ -19,6 +20,8 @@ class StreamChatWebSocketHandler(
     private val objectMapper: ObjectMapper
 ) : WebSocketHandler {
 
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override fun handle(session: WebSocketSession): Mono<Void> = mono {
         handleChatSession(session)
     }.then()
@@ -27,14 +30,19 @@ class StreamChatWebSocketHandler(
         session.receive()
             .map { it.payloadAsText }
             .asFlow()
-            .collect { json ->  // 각 메시지를 순차적으로 처리
-                val userMessage = objectMapper.readValue(json, StreamMessage::class.java)
+            .collect { json ->
+                try {
+                    val userMessage = objectMapper.readValue(json, StreamMessage::class.java)
 
-                val responseFlow = chatUseCase.streamChatResponse(userMessage)
-                    .map { aiToken -> session.textMessage(aiToken) }
-                    .asFlux()
+                    val responseFlow = chatUseCase.streamChatResponse(userMessage)
+                        .map { aiToken -> session.textMessage(aiToken) }
+                        .asFlux()
 
-                session.send(responseFlow).awaitFirstOrNull() // 완료까지 대기
+                    session.send(responseFlow).awaitFirstOrNull()
+                } catch (e: Exception) {
+                    logger.error("Failed to process message from session ${session.id}: ${e.message}", e)
+                    // session.send(Mono.just(session.textMessage("Invalid message format."))).awaitFirstOrNull()
+                }
             }
     }
 }
