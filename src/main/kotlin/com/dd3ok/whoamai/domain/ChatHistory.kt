@@ -1,7 +1,5 @@
 package com.dd3ok.whoamai.domain
 
-import com.dd3ok.whoamai.infrastructure.adapter.out.persistence.ChatHistoryDocument
-
 class ChatHistory(
     val userId: String,
     messages: List<ChatMessage> = emptyList()
@@ -13,6 +11,4 @@ class ChatHistory(
     fun addMessage(msg: ChatMessage) {
         _history.add(msg)
     }
-
-    fun toEntity() = ChatHistoryDocument(userId, _history)
 }

@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.infrastructure.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.domain.ChatMessage
 import com.google.genai.Client
 import com.google.genai.types.Content
 import com.google.genai.types.GenerateContentConfig
@@ -41,10 +42,18 @@ class GeminiAdapter(
             .build()
     }
 
-    override suspend fun generateChatContent(history: List<Content>): Flow<String> {
+    override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
+        val apiHistory = history.map { msg ->
+            Content.builder()
+                .role(msg.role)
+                .parts(Part.fromText(msg.text))
+                .build()
+        }
+
+
         return try {
             val responseStream = client.models
-                .generateContentStream(modelName, history, generationConfig)
+                .generateContentStream(modelName, apiHistory, generationConfig)
 
             flow {
                 for (response in responseStream) {

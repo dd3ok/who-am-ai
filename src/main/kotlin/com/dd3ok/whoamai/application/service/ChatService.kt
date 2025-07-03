@@ -6,10 +6,12 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.QueryType
-import com.dd3ok.whoamai.domain.*
-import com.google.genai.types.Content
-import com.google.genai.types.Part
-import kotlinx.coroutines.flow.*
+import com.dd3ok.whoamai.domain.ChatMessage
+import com.dd3ok.whoamai.domain.ChatHistory
+import com.dd3ok.whoamai.domain.StreamMessage
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
@@ -28,7 +30,6 @@ class ChatService(
         const val SUMMARY_TRIGGER_TOKENS = 4096
         const val SUMMARY_SOURCE_MESSAGES = 5
     }
-
 
     override suspend fun streamChatResponse(message: StreamMessage): Flow<String> {
         val userId = message.uuid
@@ -74,7 +75,7 @@ class ChatService(
      * [RAG 트랙] 컨텍스트가 있을 때 사용하는 엄격한 프롬프트.
      * 사실 기반 답변과 환각 방지에 초점을 맞춘다.
      */
-    private fun createRagPrompt(history: List<Content>, userPrompt: String, contexts: List<String>): List<Content> {
+    private fun createRagPrompt(history: List<ChatMessage>, userPrompt: String, contexts: List<String>): List<ChatMessage> {
         val contextString = contexts.joinToString("\n---\n")
 
         val finalUserPrompt = """
@@ -93,10 +94,13 @@ class ChatService(
             $userPrompt
         """.trimIndent()
 
-        return history + Content.fromParts(Part.fromText(finalUserPrompt))
+        return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
-    private fun createConversationalPrompt(history: List<Content>, userPrompt: String): List<Content> {
+    /**
+     * [일반 대화 트랙]
+     */
+    private fun createConversationalPrompt(history: List<ChatMessage>, userPrompt: String): List<ChatMessage> {
         val finalUserPrompt = """
         # Behavioral Protocol: General Conversation
         
@@ -116,7 +120,7 @@ class ChatService(
         $userPrompt
     """.trimIndent()
 
-        return history + Content.fromParts(Part.fromText(finalUserPrompt))
+        return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
     private suspend fun retrieveContextsForRagQuery(userPrompt: String): List<String> {
@@ -186,7 +190,7 @@ class ChatService(
         }
     }
 
-    private fun createApiHistoryWindow(domainHistory: ChatHistory): List<Content> {
+    private fun createApiHistoryWindow(domainHistory: ChatHistory): List<ChatMessage> {
         var currentTokens = 0
         val recentMessages = mutableListOf<ChatMessage>()
         for (msg in domainHistory.history.reversed()) {
@@ -196,9 +200,7 @@ class ChatService(
             currentTokens += estimatedTokens
         }
         recentMessages.reverse()
-        return recentMessages.map { msg ->
-            Content.builder().role(msg.role).parts(Part.fromText(msg.text)).build()
-        }
+        return recentMessages
     }
 
     private suspend fun summarizeHistoryIfNeeded(originalHistory: ChatHistory): ChatHistory {

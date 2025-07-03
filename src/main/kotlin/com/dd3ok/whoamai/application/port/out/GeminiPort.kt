@@ -1,9 +1,9 @@
 package com.dd3ok.whoamai.application.port.out
 
-import com.google.genai.types.Content
+import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.Flow
 
 interface GeminiPort {
-    suspend fun generateChatContent(history: List<Content>): Flow<String>
+    suspend fun generateChatContent(history: List<ChatMessage>): Flow<String>
     suspend fun summerizeContent(prompt: String): String
 }

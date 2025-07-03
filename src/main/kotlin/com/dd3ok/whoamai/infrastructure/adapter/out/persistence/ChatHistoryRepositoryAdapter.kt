@@ -10,6 +10,7 @@ class ChatHistoryRepositoryAdapter(
 ) : ChatHistoryRepository {
 
     private fun ChatHistoryDocument.toDomain() = ChatHistory(this.userId, this.messages)
+    private fun ChatHistory.toEntity() = ChatHistoryDocument(this.userId, this.history.toMutableList())
 
     override suspend fun findByUserId(userId: String): ChatHistory? {
         return documentRepository.findById(userId)?.toDomain()
