@@ -1,8 +1,8 @@
 package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
-import com.dd3ok.whoamai.config.GeminiModelProperties
-import com.dd3ok.whoamai.config.PromptProperties
+import com.dd3ok.whoamai.common.config.GeminiModelProperties
+import com.dd3ok.whoamai.common.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.google.genai.Client
 import com.google.genai.types.Content

@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.config
+package com.dd3ok.whoamai.common.config
 
 import com.dd3ok.whoamai.adapter.`in`.web.StreamChatWebSocketHandler
 import org.springframework.context.annotation.Bean
