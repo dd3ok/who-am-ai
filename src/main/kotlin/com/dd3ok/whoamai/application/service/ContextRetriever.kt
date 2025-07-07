@@ -2,7 +2,6 @@ package com.dd3ok.whoamai.application.service
 
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
-import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import org.bson.Document
@@ -31,12 +30,16 @@ class ContextRetriever(
         )
     }
 
-    // The `routeDecision` is now just a "hint" for vector search.
-    suspend fun retrieve(userPrompt: String, routeDecision: RouteDecision): List<String> {
+    /**
+     * 규칙 기반으로 컨텍스트를 검색합니다.
+     * @return 컨텍스트를 찾으면 List<String>, 못 찾으면 빈 List를 반환합니다.
+     */
+    suspend fun retrieveByRule(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
         val resumeName = resume.name.lowercase()
 
+        // 1. Specific project title check
         val matchedProject = resume.projects.find { userPrompt.contains(it.title) }
         if (matchedProject != null) {
             logger.info("Context retrieved by: Specific Project Rule ('${matchedProject.title}').")
@@ -61,30 +64,31 @@ class ContextRetriever(
             }
         }
 
-        // 3. If no rules match, THEN consider the LLM Router's decision for vector search.
-        if (routeDecision.queryType == QueryType.RESUME_RAG) {
-            logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
-            val filters = mutableListOf<Document>()
-            routeDecision.company?.let {
-                filters.add(Document("company", Document("\$eq", it)))
-            }
-            routeDecision.skills?.takeIf { it.isNotEmpty() }?.let {
-                filters.add(Document("skills", Document("\$in", it)))
-            }
+        return emptyList() // 규칙에 맞는 것이 없으면 빈 리스트 반환
+    }
 
-            val finalFilter = if (filters.isNotEmpty()) {
-                Document("\$and", filters)
-            } else {
-                null
-            }
-
-            val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
-            val finalQuery = "$userPrompt $searchKeywords".trim()
-
-            return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+    /**
+     * LLM 라우터의 힌트를 바탕으로 벡터 검색을 수행합니다.
+     */
+    suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> {
+        logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
+        val filters = mutableListOf<Document>()
+        routeDecision.company?.let {
+            filters.add(Document("company", Document("\$eq", it)))
+        }
+        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let {
+            filters.add(Document("skills", Document("\$in", it)))
         }
 
-        logger.info("No rules matched and LLMRouter classified as NON_RAG. No context will be used.")
-        return emptyList()
+        val finalFilter = if (filters.isNotEmpty()) {
+            Document("\$and", filters)
+        } else {
+            null
+        }
+
+        val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
+        val finalQuery = "$userPrompt $searchKeywords".trim()
+
+        return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
     }
 }
