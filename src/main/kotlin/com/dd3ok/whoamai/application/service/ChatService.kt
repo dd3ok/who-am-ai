@@ -118,7 +118,8 @@ class ChatService(
         val messagesToSummarize = originalHistory.history.take(SUMMARY_SOURCE_MESSAGES)
         val recentMessages = originalHistory.history.drop(SUMMARY_SOURCE_MESSAGES)
         val summarizationPrompt = """다음 대화의 핵심 내용을 한두 문단으로 간결하게 요약해주세요. --- ${messagesToSummarize.joinToString("\n") { "[${it.role}]: ${it.text}" }} --- 요약:""".trimIndent()
-        val summaryText = geminiPort.summerizeContent(summarizationPrompt)
+        // "summarization" 목적으로 API 호출 명시
+        val summaryText = geminiPort.generateContent(summarizationPrompt, "summarization")
 
         if (summaryText.isBlank()) {
             logger.warn("Summarization failed or returned empty. Skipping history modification.")

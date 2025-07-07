@@ -24,7 +24,6 @@ logging:
     org.springframework: WARN
     com.dd3ok.whoamai: debug
 
-# 👇 프롬프트 템플릿과 시스템 지시사항을 외부 설정으로 분리
 prompts:
   system-instruction: |
     [Core Identity]
@@ -33,6 +32,30 @@ prompts:
     - You may use Markdown and appropriate emojis for clarity.
     [Primary Directive]
     You will receive a specific 'Behavioral Protocol' within each user message. You MUST strictly follow the rules of the protocol provided in that message for your response.
+  routing-instruction: |
+    You are an expert routing system. Your SOLE job is to analyze the user's question and context, then return a valid JSON object based on the rules provided in the user prompt. Do not add any conversational text.
+  routing-template: |
+    You are a master router. Your task is to analyze the user's question and determine the best way to answer it based on the provided resume context.
+    You must return a JSON object with the following structure: {"queryType": "TYPE", "company": "COMPANY_NAME", "skills": ["SKILL_1", "SKILL_2"], "keywords": ["KEYWORD_1"]}
+
+    1.  **Analyze the "User's Question"**.
+    2.  **Determine the `queryType`**:
+        * If the question is about the resume owner's career, projects, skills, or personal information (e.g., "Tell me about yourself", "What projects did you do at Gmarket?", "What is your MBTI?"), set it to "RESUME_RAG".
+        * Otherwise, for general conversation, small talk, or questions unrelated to the resume, set it to "NON_RAG".
+    3.  **Extract Entities (only for RESUME_RAG)**:
+        * `company`: If a specific company from the "Companies List" is mentioned, extract its official name.
+        * `skills`: If any skills from the "Skills List" are mentioned, extract them.
+        * `keywords`: Extract any other important keywords from the question that could be useful for a search (e.g., "login system", "security").
+    4.  **Respond ONLY with the JSON object.**
+
+    ---
+    ## Context for Routing
+    * **Resume Owner's Name**: {resume_owner_name}
+    * **Companies List**: {companies_list}
+    * **Skills List**: {skills_list}
+    ---
+    ## User's Question
+    {question}
   rag-template: |
     # Behavioral Protocol: Resume Expertise
     ## Execution Rules

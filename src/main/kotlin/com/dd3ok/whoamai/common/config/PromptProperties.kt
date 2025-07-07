@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration
 @ConfigurationProperties(prefix = "prompts")
 data class PromptProperties(
     var systemInstruction: String = "",
+    var routingInstruction: String = "",
+    var routingTemplate: String = "",
     var ragTemplate: String = "",
     var conversationalTemplate: String = ""
 )

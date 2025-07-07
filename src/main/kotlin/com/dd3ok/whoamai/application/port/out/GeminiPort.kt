@@ -5,5 +5,5 @@ import kotlinx.coroutines.flow.Flow
 
 interface GeminiPort {
     suspend fun generateChatContent(history: List<ChatMessage>): Flow<String>
-    suspend fun summerizeContent(prompt: String): String
+    suspend fun generateContent(prompt: String, purpose: String): String
 }
