@@ -3,7 +3,6 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
-import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.common.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -18,7 +17,7 @@ import org.springframework.stereotype.Service
 class ChatService(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
-    private val llmRouter: LLMRouter, // QueryClassifier -> LLMRouter
+    private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
     private val promptProperties: PromptProperties
 ) : ChatUseCase {
@@ -38,29 +37,30 @@ class ChatService(
         val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
         val pastHistory = createApiHistoryWindow(domainHistory)
 
-        // 1. 의도 분류 -> LLM 라우터에 위임
+        // 1. Get a "hint" from the LLM Router first.
         val routeDecision = llmRouter.route(userPrompt)
-        logger.info("LLM Router decision: $routeDecision")
+        logger.info("LLM Router hint: $routeDecision")
 
-        // 2. 프롬프트 생성
-        val finalHistory = if (routeDecision.queryType == QueryType.RESUME_RAG) {
-            logger.info("Query classified as RESUME_RAG. Retrieving context...")
-            // 2-1. 컨텍스트 검색 (ContextRetriever 위임)
-            val relevantContexts = contextRetriever.retrieve(userPrompt, routeDecision)
+        // 2. Retrieve context. The retriever will prioritize its internal rules over the router's hint.
+        val relevantContexts = contextRetriever.retrieve(userPrompt, routeDecision)
+
+        // 3. Decide the final prompt based on whether context was found.
+        val finalHistory = if (relevantContexts.isNotEmpty()) {
+            logger.info("Context found. Proceeding with RAG prompt.")
             createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
-            logger.info("Query classified as NON_RAG. Proceeding with conversational prompt.")
+            logger.info("No context found. Proceeding with conversational prompt.")
             createConversationalPrompt(pastHistory, userPrompt)
         }
 
-        // 3. LLM 호출 및 결과 스트리밍
+        // 4. LLM 호출 및 결과 스트리밍
         val modelResponseBuilder = StringBuilder()
         return geminiPort.generateChatContent(finalHistory)
             .onEach { chunk -> modelResponseBuilder.append(chunk) }
             .onCompletion { cause ->
                 if (cause == null) {
                     val fullResponse = modelResponseBuilder.toString()
-                    // 4. 대화 기록 저장
+                    // 5. 대화 기록 저장
                     saveHistory(userId, userPrompt, fullResponse)
                 } else {
                     logger.error("Chat stream failed with cause. History NOT saved.", cause)
@@ -118,7 +118,6 @@ class ChatService(
         val messagesToSummarize = originalHistory.history.take(SUMMARY_SOURCE_MESSAGES)
         val recentMessages = originalHistory.history.drop(SUMMARY_SOURCE_MESSAGES)
         val summarizationPrompt = """다음 대화의 핵심 내용을 한두 문단으로 간결하게 요약해주세요. --- ${messagesToSummarize.joinToString("\n") { "[${it.role}]: ${it.text}" }} --- 요약:""".trimIndent()
-        // "summarization" 목적으로 API 호출 명시
         val summaryText = geminiPort.generateContent(summarizationPrompt, "summarization")
 
         if (summaryText.isBlank()) {

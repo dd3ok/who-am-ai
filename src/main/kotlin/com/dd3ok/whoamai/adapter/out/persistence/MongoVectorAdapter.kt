@@ -24,11 +24,14 @@ class MongoVectorAdapter(
 
     companion object {
         const val COLLECTION_NAME = "resume_chunks"
+        // Vector Search 전용 인덱스를 사용하도록 이름을 변경하거나,
+        // 기존 Atlas Search 인덱스를 삭제하고 Vector Search 타입으로 다시 생성해야 합니다.
         const val VECTOR_INDEX_NAME = "vector_index"
         private const val NUM_CANDIDATES_MULTIPLIER = 10
     }
 
     override suspend fun indexResume(chunks: List<ResumeChunk>): Int {
+        // 이 부분은 변경 사항 없습니다.
         return mongoTemplate.dropCollection(ResumeChunkDocument::class.java)
             .thenMany(
                 Flux.fromIterable(chunks)
@@ -63,6 +66,7 @@ class MongoVectorAdapter(
             .awaitSingle()
     }
 
+    // 가장 안정적인 $vectorSearch 방식으로 회귀
     override suspend fun searchSimilarResumeSections(query: String, topK: Int, filter: Document?): List<String> {
         val queryEmbedding = embeddingPort.embedContent(query)
         if (queryEmbedding.isEmpty()) {
@@ -77,7 +81,6 @@ class MongoVectorAdapter(
                     .append("numCandidates", (topK * NUM_CANDIDATES_MULTIPLIER).toLong())
                     .append("limit", topK.toLong())
                     .apply {
-                        // filter가 null이 아닐 경우에만 쿼리에 추가
                         filter?.let { append("filter", it) }
                     }
             )
