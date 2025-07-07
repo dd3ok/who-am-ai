@@ -3,13 +3,14 @@ package com.dd3ok.whoamai.adapter.out.persistence
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.service.ResumeChunkingService
 import com.dd3ok.whoamai.domain.Resume
+import org.bson.Document
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
 @Component
 class ResumePersistenceAdapter(
     private val vectorDBPort: VectorDBPort,
-    private val resumeChunkingService: ResumeChunkingService // 의존성 주입
+    private val resumeChunkingService: ResumeChunkingService
 ) : ResumePersistencePort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -30,7 +31,7 @@ class ResumePersistenceAdapter(
         return vectorDBPort.findChunkById(id)
     }
 
-    override suspend fun searchSimilarSections(query: String, topK: Int): List<String> {
-        return vectorDBPort.searchSimilarResumeSections(query, topK)
+    override suspend fun searchSimilarSections(query: String, topK: Int, filter: Document?): List<String> {
+        return vectorDBPort.searchSimilarResumeSections(query, topK, filter)
     }
 }

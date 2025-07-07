@@ -76,7 +76,10 @@ class MongoVectorAdapter(
                     .append("queryVector", queryEmbedding)
                     .append("numCandidates", (topK * NUM_CANDIDATES_MULTIPLIER).toLong())
                     .append("limit", topK.toLong())
-                    .apply { filter?.let { append("filter", it) } }
+                    .apply {
+                        // filter가 null이 아닐 경우에만 쿼리에 추가
+                        filter?.let { append("filter", it) }
+                    }
             )
         )
         val projectStage = Aggregation.project("content").andExclude("_id")

@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service
 class ChatService(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
-    private val queryClassifier: QueryClassifier,
+    private val llmRouter: LLMRouter, // QueryClassifier -> LLMRouter
     private val contextRetriever: ContextRetriever,
     private val promptProperties: PromptProperties
 ) : ChatUseCase {
@@ -38,14 +38,15 @@ class ChatService(
         val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
         val pastHistory = createApiHistoryWindow(domainHistory)
 
-        // 1. 의도 분류 (QueryClassifier 위임)
-        val queryType = queryClassifier.classify(userPrompt)
+        // 1. 의도 분류 -> LLM 라우터에 위임
+        val routeDecision = llmRouter.route(userPrompt)
+        logger.info("LLM Router decision: $routeDecision")
 
         // 2. 프롬프트 생성
-        val finalHistory = if (queryType == QueryType.RESUME_RAG) {
+        val finalHistory = if (routeDecision.queryType == QueryType.RESUME_RAG) {
             logger.info("Query classified as RESUME_RAG. Retrieving context...")
             // 2-1. 컨텍스트 검색 (ContextRetriever 위임)
-            val relevantContexts = contextRetriever.retrieve(userPrompt)
+            val relevantContexts = contextRetriever.retrieve(userPrompt, routeDecision)
             createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
             logger.info("Query classified as NON_RAG. Proceeding with conversational prompt.")
