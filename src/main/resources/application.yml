@@ -79,3 +79,10 @@ prompts:
     ---
     # User's LATEST Message
     {question}
+
+rate-limit:
+  requests: 10   # 10분 동안 최대 10번 호출 허용
+  minutes: 60  # 제한 시간 10분
+  bypass-parameter:
+    name: limit # 우회에 사용할 파라미터 이름
+    value: no   # 우회 파라미터의 값
