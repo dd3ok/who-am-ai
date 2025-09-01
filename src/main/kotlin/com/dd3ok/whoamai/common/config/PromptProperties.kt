@@ -14,10 +14,16 @@ data class PromptProperties(
 )
 
 @Configuration
-@ConfigurationProperties(prefix = "gemini.model")
-data class GeminiModelProperties(
+@ConfigurationProperties(prefix = "gemini.chat.model")
+data class GeminiChatModelProperties(
     var name: String = "",
     var text: String = "",
     var temperature: Float = 0.7f,
     var maxOutputTokens: Int = 8192
+)
+
+@Configuration
+@ConfigurationProperties(prefix = "gemini.image.model")
+data class GeminiImageModelProperties(
+    var name: String = "",
 )

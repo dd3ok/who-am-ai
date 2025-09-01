@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 class GeminiConfig(
     @Value("\${gemini.api.key}") private val apiKey: String,
-    private val modelProperties: GeminiModelProperties,
+    private val modelProperties: GeminiChatModelProperties,
     private val promptProperties: PromptProperties
 ) {
 

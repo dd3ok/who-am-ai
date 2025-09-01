@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component
 @Component
 class GeminiApiEmbeddingAdapter(
     @Value("\${gemini.api.key}") private val apiKey: String,
-    @Value("\${gemini.model.text}") private val modelName: String
+    @Value("\${gemini.chat.model.text}") private val modelName: String
 ) : EmbeddingPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)

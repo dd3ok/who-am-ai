@@ -1,7 +1,6 @@
 spring:
   application:
     name: who-am-ai
-
   data:
     mongodb:
       uri: ${MONGO_URI}
@@ -12,11 +11,16 @@ server:
 gemini:
   api:
     key: ${GEMINI_API_KEY}
-  model:
-    name: "gemini-2.5-flash-lite-preview-06-17"
-    text: "text-embedding-004"
-    temperature: 0.75
-    max-output-tokens: 8192
+  chat:
+    model:
+      name: "gemini-2.5-flash-lite-preview-06-17"
+      text: "text-embedding-004"
+      temperature: 0.75
+      max-output-tokens: 8192
+  image:
+    model:
+      name: "gemini-2.5-flash-image-preview"
+
 
 logging:
   level:
