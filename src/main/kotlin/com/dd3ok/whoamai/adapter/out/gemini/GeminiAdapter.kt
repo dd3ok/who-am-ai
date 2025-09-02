@@ -69,21 +69,53 @@ class GeminiAdapter(
 
     suspend fun generateImageContent(clothingImagePart: Part, personImagePart: Part): GenerateContentResponse {
         val instructionParts = listOf(
-            Part.fromText("시스템 지시: 멀티 이미지 입력을 받아 인물 이미지(베이스)에 의류 이미지(레퍼런스)를 자연스럽게 착용시키는 합성을 수행한다. 변경 대상 외 모든 요소는 보존한다(얼굴, 피부 톤, 머리카락, 손, 배경)."),
-            Part.fromText("작업: 인물에게 레퍼런스 의류를 자연스럽게 착용시킨다."),
-            Part.fromText("정합 조건: 목둘레·어깨선·소매/밑단 길이·실루엣을 인물 포즈에 맞춘다."),
-            Part.fromText("물리 일관성: 주름/광택/그림자/오클루전(팔/손/머리카락 가림)을 현실적으로 반영한다."),
-            Part.fromText("보존 조건: 얼굴·피부 톤·헤어·손·액세서리·배경은 변경 금지."),
-            Part.fromText("금지: 신체 왜곡·로고/패턴의 부자연스러운 비틀림·경계 번짐. 절대 이미지를 그대로 잘라 붙여서는 안 된다."),
-            Part.fromText("출력 형태: 텍스트 없이 이미지만 출력")
+            Part.fromText("""
+<prompt>
+  <meta>
+    <directive>Interpret all instructions as binding constraints.</directive>
+    <directive>Redraw the entire image from scratch. Do not collage or paste from references.</directive>
+  </meta>
+
+  <input_images>
+    <source id="1">Image containing the GARMENT to use. Ignore everything else (person, background, etc.).</source>
+    <target id="2">Image of the PERSON and SCENE to apply the garment to. This is the base to be preserved.</target>
+  </input_images>
+
+  <core_objective>
+    Replace the garment worn by the person in the <target> image with the garment from the <source> image.
+    The new garment must be redrawn to naturally fit the target person's body shape and pose.
+  </core_objective>
+
+  <key_rules>
+    <rule priority="1">
+      The person's face, hair, body, and pose in the <target> image MUST remain unchanged. The background must also be perfectly preserved. This is the highest priority.
+    </rule>
+    <rule priority="2">
+      The original garment from the <target> image must be completely removed. No traces should remain.
+    </rule>
+    <rule priority="3">
+      The new garment must integrate seamlessly. Match the lighting, shadows, folds, and wrinkles to the <target> scene.
+    </rule>
+    <rule priority="4">
+      Forbidden actions: Do not use collage or cut-and-paste methods. Do not change the person's identity. Do not add watermarks or text.
+    </rule>
+  </key_rules>
+
+  <output>
+    A single, clean, high-quality image.
+  </output>
+</prompt>
+
+    """.trimIndent())
         )
+
         val systemInstruction = Content.builder().parts(instructionParts).build()
         val config = GenerateContentConfig.builder()
             .systemInstruction(systemInstruction)
             .seed(1234)
-            .temperature(0.4f)
-            .topP(0.9f)
-            .topK(30.0f)
+            .temperature(0.3f)
+//            .topP(0.8f)
+//            .topK(30.0f)
             .build()
 
         val userContent = Content.builder()
