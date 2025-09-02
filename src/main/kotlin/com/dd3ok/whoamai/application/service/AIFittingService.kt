@@ -17,17 +17,7 @@ class AIFittingService(
             val personImagePart = bytesToPart(personImageFile, "image/jpeg")
             val clothingImagePart = bytesToPart(clothingImageFile, "image/jpeg")
 
-            val prompt = """
-            목표는 왼쪽 의류 사진의 옷을 오른쪽 인물 사진의 모델에게 입히는 것입니다.
-            - 왼쪽 의류 사진에 인물이 포함되면 해당 인물이 입은 옷을 추출해주세요.
-            - 왼쪽 의류 사진에 상의, 하의 둘다 있다면 둘다 추출해 주세요.
-            - 오른쪽 인물사진의 기존 옷을 제거하고 왼쪽 의류 사진에서 추출된 옷으로 자연스럽게 입혀주세요.
-        """.trimIndent()
-
-            val response = geminiAdapter.generateImageContent(
-                parts = listOf(clothingImagePart, personImagePart, Part.fromText(prompt)),
-                systemInstruction = "결과물은 text가 아닌 image만 생성함"
-            )
+            val response = geminiAdapter.generateImageContent(clothingImagePart, personImagePart)
 
             val candidates = response.candidates().get()
             if (candidates.isEmpty()) {

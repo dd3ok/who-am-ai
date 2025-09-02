@@ -29,7 +29,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
     // Gemini
-    implementation("com.google.genai:google-genai:1.5.0")
+    implementation("com.google.genai:google-genai:1.15.0")
 
     // DB
     implementation("org.springframework.boot:spring-boot-starter-data-mongodb-reactive")

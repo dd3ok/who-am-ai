@@ -67,11 +67,32 @@ class GeminiAdapter(
         }
     }
 
-    suspend fun generateImageContent(parts: List<Part>, systemInstruction: String): GenerateContentResponse {
+    suspend fun generateImageContent(clothingImagePart: Part, personImagePart: Part): GenerateContentResponse {
+        val instructionParts = listOf(
+            Part.fromText("시스템 지시: 멀티 이미지 입력을 받아 인물 이미지(베이스)에 의류 이미지(레퍼런스)를 자연스럽게 착용시키는 합성을 수행한다. 변경 대상 외 모든 요소는 보존한다(얼굴, 피부 톤, 머리카락, 손, 배경)."),
+            Part.fromText("작업: 인물에게 레퍼런스 의류를 자연스럽게 착용시킨다."),
+            Part.fromText("정합 조건: 목둘레·어깨선·소매/밑단 길이·실루엣을 인물 포즈에 맞춘다."),
+            Part.fromText("물리 일관성: 주름/광택/그림자/오클루전(팔/손/머리카락 가림)을 현실적으로 반영한다."),
+            Part.fromText("보존 조건: 얼굴·피부 톤·헤어·손·액세서리·배경은 변경 금지."),
+            Part.fromText("금지: 신체 왜곡·로고/패턴의 부자연스러운 비틀림·경계 번짐. 절대 이미지를 그대로 잘라 붙여서는 안 된다."),
+            Part.fromText("출력 형태: 텍스트 없이 이미지만 출력")
+        )
+        val systemInstruction = Content.builder().parts(instructionParts).build()
         val config = GenerateContentConfig.builder()
-            .systemInstruction(Content.fromParts(Part.fromText(systemInstruction)))
+            .systemInstruction(systemInstruction)
+            .seed(1234)
+            .temperature(0.4f)
+            .topP(0.9f)
+            .topK(30.0f)
             .build()
-        val contents = Content.builder().parts(parts).build()
+
+        val userContent = Content.builder()
+            .role("user")
+            .parts(listOf(clothingImagePart, personImagePart))
+            .build()
+
+        val contents = listOf(userContent)
+
         return try {
             client.models.generateContent(imageModelProperties.name, contents, config)
         } catch (e: Exception) {
