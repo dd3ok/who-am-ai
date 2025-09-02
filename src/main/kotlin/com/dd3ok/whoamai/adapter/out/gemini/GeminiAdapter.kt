@@ -72,40 +72,36 @@ class GeminiAdapter(
             Part.fromText("""
 <prompt>
   <meta>
-    <directive>Interpret all instructions as binding constraints.</directive>
-    <directive>Redraw the entire image from scratch. Do not collage or paste from references.</directive>
+    <directive>Task: Garment Replacement. All instructions are binding constraints.</directive>
+    <directive>Redraw from scratch. Do not collage or paste.</directive>
   </meta>
 
-  <input_images>
-    <source id="1">Image containing the GARMENT to use. Ignore everything else (person, background, etc.).</source>
-    <target id="2">Image of the PERSON and SCENE to apply the garment to. This is the base to be preserved.</target>
-  </input_images>
+  <thought_process>
+    <step name="1. DECONSTRUCT">
+      <instruction>Conceptually deconstruct the input images into core components:</instruction>
+      <component id="STYLE">From input image 1: Isolate the visual style of the GARMENT(S) (color, texture, pattern, shape). Ignore the person wearing it and the background.</component>
+      <component id="PERSON">From input image 2: Isolate the PERSON (face, body, pose, hair).</component>
+      <component id="SCENE">From input image 2: Isolate the BACKGROUND and lighting conditions.</component>
+    </step>
 
-  <core_objective>
-    Replace the garment worn by the person in the <target> image with the garment from the <source> image.
-    The new garment must be redrawn to naturally fit the target person's body shape and pose.
-  </core_objective>
+    <step name="2. REPLACE">
+      <instruction>On the isolated <PERSON> component, identify and completely remove the original clothing. This creates a "blank canvas" on the person's body where the new garment will be placed.</instruction>
+    </step>
 
-  <key_rules>
-    <rule priority="1">
-      The person's face, hair, body, and pose in the <target> image MUST remain unchanged. The background must also be perfectly preserved. This is the highest priority.
-    </rule>
-    <rule priority="2">
-      The original garment from the <target> image must be completely removed. No traces should remain.
-    </rule>
-    <rule priority="3">
-      The new garment must integrate seamlessly. Match the lighting, shadows, folds, and wrinkles to the <target> scene.
-    </rule>
-    <rule priority="4">
-      Forbidden actions: Do not use collage or cut-and-paste methods. Do not change the person's identity. Do not add watermarks or text.
-    </rule>
-  </key_rules>
+    <step name="3. REASSEMBLE">
+      <instruction>Reassemble the components into a new, final image:</instruction>
+      <assembly_step>Start with the original <SCENE>.</assembly_step>
+      <assembly_step>Place the <PERSON> (now without their original clothes) into the <SCENE>.</assembly_step>
+      <assembly_step>Redraw the <STYLE> component onto the person's body, making it fit the pose and body shape naturally. The lighting on the new garment must match the <SCENE>.</assembly_step>
+    </step>
+  </thought_process>
 
-  <output>
-    A single, clean, high-quality image.
-  </output>
+  <absolute_rules>
+    <rule priority="1">The <PERSON> and <SCENE> components from input image 2 are locked. They MUST NOT be altered. This is the highest priority.</rule>
+    <rule>The replacement must be perfect. No traces of the original clothing should remain.</rule>
+    <rule>If the <STYLE> component includes both a top and a bottom, replace both on the target.</rule>
+  </absolute_rules>
 </prompt>
-
     """.trimIndent())
         )
 
