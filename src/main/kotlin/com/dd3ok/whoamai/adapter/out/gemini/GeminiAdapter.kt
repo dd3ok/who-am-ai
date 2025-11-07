@@ -3,73 +3,131 @@ package com.dd3ok.whoamai.adapter.out.gemini
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
+import com.dd3ok.whoamai.common.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatMessage
-import com.google.genai.Client
-import com.google.genai.types.Content
-import com.google.genai.types.GenerateContentConfig
-import com.google.genai.types.GenerateContentResponse
-import com.google.genai.types.Part
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.reactive.asFlow
 import org.slf4j.LoggerFactory
+import org.springframework.ai.image.ImageModel
+import org.springframework.ai.image.ImagePrompt
+import org.springframework.ai.chat.messages.AssistantMessage
+import org.springframework.ai.chat.messages.Message
+import org.springframework.ai.chat.messages.SystemMessage
+import org.springframework.ai.chat.messages.UserMessage
+import org.springframework.ai.chat.model.ChatModel
+import org.springframework.ai.chat.model.StreamingChatModel
+import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
+import java.util.Base64
 
+/**
+ * 작업 목적: Google GenAI 텍스트 경로는 Spring AI ChatModel/StreamingChatModel을 사용하고, 이미지 생성은 SDK Client를 사용한다.
+ * 주요 로직: 도메인 `ChatMessage`를 Spring AI 메시지로 변환한 뒤 Prompt + 옵션을 구성해 호출하고, 이미지 전용 API는 Spring AI ImageModel 추상화를 통해 호출한다.
+ */
 @Component
 class GeminiAdapter(
-    private val client: Client,
+    private val streamingChatModel: StreamingChatModel,
+    private val chatModel: ChatModel,
+    private val promptProperties: PromptProperties,
     private val chatModelProperties: GeminiChatModelProperties,
     private val imageModelProperties: GeminiImageModelProperties,
-    @Qualifier("generationConfig") private val generationConfig: GenerateContentConfig,
-    @Qualifier("routingConfig") private val routingConfig: GenerateContentConfig,
-    @Qualifier("summarizationConfig") private val summarizationConfig: GenerateContentConfig
+    @Qualifier("geminiAIFittingImageModel")
+    private val imageModel: ImageModel
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
-        val apiHistory = history.map { msg ->
-            Content.builder()
-                .role(msg.role)
-                .parts(Part.fromText(msg.text))
-                .build()
-        }
+        val messages = buildPromptMessages(history, promptProperties.systemInstruction)
+        val prompt = Prompt(messages, defaultChatOptions())
 
-        return try {
-            val responseStream = client.models
-                .generateContentStream(chatModelProperties.name, apiHistory, generationConfig)
-
-            flow {
-                for (response in responseStream) {
-                    response.text()?.let { emit(it) }
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Error while calling Gemini API: ${e.message}", e)
-            flowOf("죄송합니다, AI 응답 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
-        }
+        return streamingChatModel.stream(prompt)
+            .asFlow()
+            .map { it.result?.output?.text.orEmpty() }
+            .filter { it.isNotBlank() }
     }
 
     override suspend fun generateContent(prompt: String, purpose: String): String {
-        val config = when (purpose) {
-            "routing" -> routingConfig
-            "summarization" -> summarizationConfig
-            else -> generationConfig
+        val (systemInstruction, temperature, maxTokens) = when (purpose) {
+            "routing" -> Triple(promptProperties.routingInstruction, 0.1, 512)
+            "summarization" -> Triple(null, 0.5, 1024)
+            else -> Triple(promptProperties.systemInstruction, chatModelProperties.temperature.toDouble(), chatModelProperties.maxOutputTokens)
         }
 
+        val messages = mutableListOf<Message>()
+        systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
+        messages += UserMessage(prompt)
+
+        val options = GoogleGenAiChatOptions.builder()
+            .model(chatModelProperties.model)
+            .temperature(temperature)
+            .maxOutputTokens(maxTokens)
+            .build()
+
         return try {
-            val response = client.models.generateContent(chatModelProperties.name, prompt, config)
-            response.text() ?: ""
+            val response = chatModel.call(Prompt(messages, options))
+            response.result?.output?.text.orEmpty()
         } catch (e: Exception) {
             logger.error("Error while calling Gemini API for purpose '$purpose': ${e.message}", e)
             ""
         }
     }
 
-    suspend fun generateImageContent(clothingImagePart: Part, personImagePart: Part): GenerateContentResponse {
-        val instructionParts = listOf(
-            Part.fromText("""
+    override suspend fun generateStyledImage(
+        personImageFile: ByteArray,
+        clothingImageFile: ByteArray
+    ): ByteArray {
+        val options = GeminiFittingImageOptions(
+            personImageFile,
+            clothingImageFile,
+            imageModelProperties.mimeType,
+            imageModelProperties.modelName,
+            imageModelProperties.temperature,
+            imageModelProperties.seed
+        )
+        val prompt = ImagePrompt(AI_FITTING_PROMPT, options)
+        val response = imageModel.call(prompt)
+        val generation = response.result
+            ?: throw IllegalStateException("No image generation results returned from Gemini ImageModel.")
+        val base64 = generation.output.b64Json
+            ?: throw IllegalStateException("Gemini ImageModel returned empty image payload.")
+        return try {
+            Base64.getDecoder().decode(base64)
+        } catch (e: IllegalArgumentException) {
+            logger.error("Failed to decode Gemini image payload: ${e.message}", e)
+            throw e
+        }
+    }
+
+    private fun defaultChatOptions(): GoogleGenAiChatOptions {
+        return GoogleGenAiChatOptions.builder()
+            .model(chatModelProperties.model)
+            .temperature(chatModelProperties.temperature.toDouble())
+            .maxOutputTokens(chatModelProperties.maxOutputTokens)
+            .build()
+    }
+
+    private fun buildPromptMessages(history: List<ChatMessage>, systemInstruction: String?): List<Message> {
+        val messages = mutableListOf<Message>()
+        systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
+        history.mapTo(messages, ::toAiMessage)
+        return messages
+    }
+
+    private fun toAiMessage(chatMessage: ChatMessage): Message {
+        return when (chatMessage.role.lowercase()) {
+            "system" -> SystemMessage(chatMessage.text)
+            "model", "assistant" -> AssistantMessage(chatMessage.text)
+            else -> UserMessage(chatMessage.text)
+        }
+    }
+
+    companion object {
+        private val AI_FITTING_PROMPT = """
 <prompt>
   <meta>
     <directive>Task: Garment Replacement. All instructions are binding constraints.</directive>
@@ -102,30 +160,6 @@ class GeminiAdapter(
     <rule>If the <STYLE> component includes both a top and a bottom, replace both on the target.</rule>
   </absolute_rules>
 </prompt>
-    """.trimIndent())
-        )
-
-        val systemInstruction = Content.builder().parts(instructionParts).build()
-        val config = GenerateContentConfig.builder()
-            .systemInstruction(systemInstruction)
-            .seed(1234)
-            .temperature(0.3f)
-//            .topP(0.8f)
-//            .topK(30.0f)
-            .build()
-
-        val userContent = Content.builder()
-            .role("user")
-            .parts(listOf(clothingImagePart, personImagePart))
-            .build()
-
-        val contents = listOf(userContent)
-
-        return try {
-            client.models.generateContent(imageModelProperties.name, contents, config)
-        } catch (e: Exception) {
-            logger.error("Error while calling Gemini API for AIFitting: ${e.message}", e)
-            throw e
-        }
+        """.trimIndent()
     }
 }

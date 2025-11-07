@@ -23,6 +23,9 @@ spring:
             task-type: RETRIEVAL_DOCUMENT
         image:
           model-name: gemini-2.5-flash-image
+          temperature: 0.3
+          seed: 1234
+          mime-type: image/jpeg
     vectorstore:
       mongodb:
         initialize-schema: false
