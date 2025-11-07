@@ -4,16 +4,21 @@ import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
-import org.bson.Document
 import org.slf4j.LoggerFactory
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
 import org.springframework.stereotype.Component
 
+/**
+ * 작업 목적: 규칙 기반 및 벡터 검색을 통해 사용자 프롬프트에 적합한 이력서 컨텍스트를 조회한다.
+ * 주요 로직: 명시적 규칙으로 우선 검색 후, 필요 시 Spring AI VectorStore 필터 표현식을 조합해 유사도 검색을 위임한다.
+ */
 @Component
 class ContextRetriever(
     private val resumePersistencePort: ResumePersistencePort,
     private val resumeProviderPort: ResumeProviderPort
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val filterExpressionBuilder = FilterExpressionBuilder()
 
     private val rules: List<(String, String) -> String?> by lazy {
         listOf(
@@ -72,18 +77,21 @@ class ContextRetriever(
      */
     suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> {
         logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
-        val filters = mutableListOf<Document>()
+        val filterOps = mutableListOf<FilterExpressionBuilder.Op>()
         routeDecision.company?.let {
-            filters.add(Document("company", Document("\$eq", it)))
+            filterOps.add(filterExpressionBuilder.eq("company", it))
         }
-        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let {
-            filters.add(Document("skills", Document("\$in", it)))
+        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let { skills ->
+            filterOps.add(filterExpressionBuilder.`in`("skills", skills))
         }
 
-        val finalFilter = if (filters.isNotEmpty()) {
-            Document("\$and", filters)
-        } else {
-            null
+        val finalFilter = when (filterOps.size) {
+            0 -> null
+            1 -> filterOps.first().build()
+            else -> filterOps
+                .drop(1)
+                .fold(filterOps.first()) { acc, op -> filterExpressionBuilder.and(acc, op) }
+                .build()
         }
 
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
