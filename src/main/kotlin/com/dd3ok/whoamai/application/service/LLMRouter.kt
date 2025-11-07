@@ -30,17 +30,49 @@ class LLMRouter(
             .replace("{skills_list}", skills.joinToString(", "))
             .replace("{question}", userPrompt)
 
-        try {
-            val responseJson = geminiPort.generateContent(prompt, "routing")
-            if (responseJson.isBlank()) {
-                logger.warn("LLM Router returned a blank response. Defaulting to NON_RAG.")
-                return RouteDecision(QueryType.NON_RAG)
-            }
-            val pureJson = responseJson.substringAfter("```json").substringBeforeLast("```").trim()
-            return objectMapper.readValue(pureJson)
-        } catch (e: Exception) {
-            logger.error("Error parsing LLM Router response. Defaulting to NON_RAG. Error: ${e.message}", e)
+        val responseJson = geminiPort.generateContent(prompt, "routing")
+        if (responseJson.isBlank()) {
+            logger.warn("LLM Router returned a blank response. Defaulting to NON_RAG.")
             return RouteDecision(QueryType.NON_RAG)
         }
+
+        val jsonPayload = extractJsonBlock(responseJson)
+
+        return try {
+            objectMapper.readValue(jsonPayload)
+        } catch (e: Exception) {
+            logger.error(
+                "Error parsing LLM Router response. Defaulting to NON_RAG. payload={}",
+                jsonPayload.take(200),
+                e
+            )
+            RouteDecision(QueryType.NON_RAG)
+        }
+    }
+
+    private fun extractJsonBlock(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) {
+            return trimmed
+        }
+
+        if (trimmed.contains("```json")) {
+            val block = trimmed.substringAfter("```json").substringBefore("```").trim()
+            if (block.isNotEmpty()) {
+                return block
+            }
+        }
+
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return trimmed
+        }
+
+        val start = trimmed.indexOf('{')
+        val end = trimmed.lastIndexOf('}')
+        if (start != -1 && end != -1 && end > start) {
+            return trimmed.substring(start, end + 1).trim()
+        }
+
+        return trimmed
     }
 }
