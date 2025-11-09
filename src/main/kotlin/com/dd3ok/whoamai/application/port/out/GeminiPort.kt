@@ -6,4 +6,5 @@ import kotlinx.coroutines.flow.Flow
 interface GeminiPort {
     suspend fun generateChatContent(history: List<ChatMessage>): Flow<String>
     suspend fun generateContent(prompt: String, purpose: String): String
+    suspend fun generateStyledImage(personImageFile: ByteArray, clothingImageFile: ByteArray): ByteArray
 }

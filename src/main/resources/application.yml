@@ -4,23 +4,38 @@ spring:
   data:
     mongodb:
       uri: ${MONGO_URI}
+  ai:
+    model:
+      chat: google-genai
+      embedding: google-genai
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: gemini-2.5-flash-lite
+            temperature: 0.75
+            max-output-tokens: 8192
+        embedding:
+          api-key: ${GEMINI_API_KEY}
+          options:
+            model: text-embedding-004
+            task-type: RETRIEVAL_DOCUMENT
+        image:
+          model-name: gemini-2.5-flash-image
+          temperature: 0.3
+          seed: 1234
+          mime-type: image/jpeg
+    vectorstore:
+      mongodb:
+        initialize-schema: false
+        collection-name: resume_chunks
+        index-name: vector_index
+        path-name: content_embedding
+        metadata-fields-to-filter: company,skills
 
 server:
   port: 8080
-
-gemini:
-  api:
-    key: ${GEMINI_API_KEY}
-  chat:
-    model:
-      name: "gemini-2.5-flash-lite-preview-06-17"
-      text: "text-embedding-004"
-      temperature: 0.75
-      max-output-tokens: 8192
-  image:
-    model:
-      name: "gemini-2.5-flash-image-preview"
-
 
 logging:
   level:
