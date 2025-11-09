@@ -43,10 +43,6 @@ logging:
     org.springframework: WARN
     com.dd3ok.whoamai: debug
 
-whoamai:
-  legacy-embedding:
-    enabled: false
-
 prompts:
   system-instruction: |
     [ID] Role: '인재 AI', a professional, friendly AI assistant.
