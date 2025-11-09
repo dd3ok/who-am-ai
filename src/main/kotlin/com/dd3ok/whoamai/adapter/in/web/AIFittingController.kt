@@ -1,11 +1,10 @@
 package com.dd3ok.whoamai.adapter.`in`.web
 
 import com.dd3ok.whoamai.application.port.`in`.AIFittingUseCase
+import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.core.io.buffer.DataBufferUtils
-import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.http.MediaType.IMAGE_JPEG_VALUE
 import org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE
 import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.multipart.FilePart
@@ -17,10 +16,11 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/ai-fitting")
 class AIFittingController(
-    private val aiFittingUseCase: AIFittingUseCase
+    private val aiFittingUseCase: AIFittingUseCase,
+    private val imageModelProperties: GeminiImageModelProperties
 ) {
 
-    @PostMapping(consumes = [MULTIPART_FORM_DATA_VALUE], produces = [IMAGE_JPEG_VALUE])
+    @PostMapping(consumes = [MULTIPART_FORM_DATA_VALUE])
     suspend fun generateStyledImage(
         @RequestPart("personImage") personImageFile: FilePart,
         @RequestPart("clothingImage") clothingImageFile: FilePart
@@ -38,8 +38,14 @@ class AIFittingController(
 
         val resultImage = aiFittingUseCase.generateStyledImage(personBytes, clothingBytes)
 
-        val headers = HttpHeaders().apply { contentType = MediaType.IMAGE_JPEG }
-        ResponseEntity.ok().headers(headers).body(resultImage)
+        val resolvedMediaType = imageModelProperties.mimeType
+            .takeIf { it.isNotBlank() }
+            ?.let(MediaType::parseMediaType)
+            ?: MediaType.IMAGE_JPEG
+
+        ResponseEntity.ok()
+            .contentType(resolvedMediaType)
+            .body(resultImage)
     } catch (e: Exception) {
         ResponseEntity.status(500).build()
     }
