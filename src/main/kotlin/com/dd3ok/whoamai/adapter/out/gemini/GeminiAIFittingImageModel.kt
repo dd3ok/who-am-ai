@@ -27,7 +27,7 @@ class GeminiAIFittingImageModel(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private val restClient: RestClient = RestClient.builder()
-        .baseUrl(GOOGLE_GENAI_BASE_URL)
+        .baseUrl(imageModelProperties.baseUrl)
         .build()
 
     override fun call(request: ImagePrompt): ImageResponse {
@@ -40,7 +40,7 @@ class GeminiAIFittingImageModel(
         val response = try {
             restClient.post()
                 .uri { uriBuilder ->
-                    uriBuilder.path("/v1beta/models/{model}:generateContent")
+                    uriBuilder.path(imageModelProperties.generatePath)
                         .queryParam("key", genAiApiKey)
                         .build(modelName)
                 }
@@ -65,6 +65,11 @@ class GeminiAIFittingImageModel(
         val instruction = extractInstruction(request)
         val clothing = encodeInlineData(options.clothingImage, options.mimeType)
         val person = encodeInlineData(options.personImage, options.mimeType)
+        val promptParts = mutableListOf(
+            Part(text = instruction),
+            Part(inlineData = clothing),
+            Part(inlineData = person)
+        )
 
         val generationConfig = GenerationConfig(
             temperature = (options.temperature ?: imageModelProperties.temperature).toDouble(),
@@ -78,10 +83,7 @@ class GeminiAIFittingImageModel(
 
         val userContent = Content(
             role = "user",
-            parts = listOf(
-                Part(inlineData = clothing),
-                Part(inlineData = person)
-            )
+            parts = promptParts
         )
 
         return GenerateContentRequest(
@@ -159,6 +161,5 @@ class GeminiAIFittingImageModel(
 
     companion object {
         private const val DEFAULT_INSTRUCTION = "Please perform garment replacement according to the provided assets."
-        private const val GOOGLE_GENAI_BASE_URL = "https://generativelanguage.googleapis.com"
     }
 }

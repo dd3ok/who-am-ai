@@ -22,6 +22,8 @@ spring:
             model: text-embedding-004
             task-type: RETRIEVAL_DOCUMENT
         image:
+          base-url: https://generativelanguage.googleapis.com
+          generate-path: "/v1/models/{model}:generateContent"
           model-name: gemini-2.5-flash-image
           temperature: 0.3
           seed: 1234

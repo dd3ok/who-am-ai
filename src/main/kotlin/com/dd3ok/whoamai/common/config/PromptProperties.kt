@@ -31,11 +31,13 @@ data class GeminiChatModelProperties(
 
 /**
  * 작업 목적: 이미지 생성용 모델명을 외부 설정에서 주입한다.
- * 주요 로직: `spring.ai.google.genai.image` 네임스페이스를 매핑해 이미지 전용 API 호출 시 사용할 모델을 노출한다.
+ * 주요 로직: `spring.ai.google.genai.image` 네임스페이스를 매핑해 이미지 전용 API 호출 시 사용할 모델·엔드포인트를 노출한다.
  */
 @Configuration
 @ConfigurationProperties(prefix = "spring.ai.google.genai.image")
 data class GeminiImageModelProperties(
+    var baseUrl: String = "https://generativelanguage.googleapis.com",
+    var generatePath: String = "/v1/models/{model}:generateContent",
     var modelName: String = "",
     var temperature: Float = 0.3f,
     var seed: Int? = 1234,
