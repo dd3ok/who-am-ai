@@ -30,17 +30,21 @@ class LLMRouter(
             .replace("{skills_list}", skills.joinToString(", "))
             .replace("{question}", userPrompt)
 
-        try {
-            val responseJson = geminiPort.generateContent(prompt, "routing")
-            if (responseJson.isBlank()) {
-                logger.warn("LLM Router returned a blank response. Defaulting to NON_RAG.")
-                return RouteDecision(QueryType.NON_RAG)
-            }
-            val pureJson = responseJson.substringAfter("```json").substringBeforeLast("```").trim()
-            return objectMapper.readValue(pureJson)
-        } catch (e: Exception) {
-            logger.error("Error parsing LLM Router response. Defaulting to NON_RAG. Error: ${e.message}", e)
+        val responseJson = geminiPort.generateContent(prompt, "routing").trim()
+        if (responseJson.isBlank()) {
+            logger.warn("LLM Router returned a blank response. Defaulting to NON_RAG.")
             return RouteDecision(QueryType.NON_RAG)
+        }
+
+        return try {
+            objectMapper.readValue(responseJson)
+        } catch (e: Exception) {
+            logger.error(
+                "Error parsing LLM Router response. Defaulting to NON_RAG. payload={}",
+                responseJson.take(200),
+                e
+            )
+            RouteDecision(QueryType.NON_RAG)
         }
     }
 }
