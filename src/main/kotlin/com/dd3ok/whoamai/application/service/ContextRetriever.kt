@@ -85,13 +85,10 @@ class ContextRetriever(
             filterOps.add(filterExpressionBuilder.`in`("skills", skills))
         }
 
-        val finalFilter = when (filterOps.size) {
-            0 -> null
-            1 -> filterOps.first().build()
-            else -> filterOps
-                .drop(1)
-                .fold(filterOps.first()) { acc, op -> filterExpressionBuilder.and(acc, op) }
-                .build()
+        val finalFilter = if (filterOps.isEmpty()) {
+            null
+        } else {
+            filterOps.reduce { acc, op -> filterExpressionBuilder.and(acc, op) }.build()
         }
 
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
