@@ -5,10 +5,12 @@ import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import com.dd3ok.whoamai.common.config.PromptProperties
 import com.dd3ok.whoamai.domain.ChatMessage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactive.asFlow
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.ai.image.ImageModel
 import org.springframework.ai.image.ImagePrompt
@@ -41,6 +43,13 @@ class GeminiAdapter(
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
+    private data class ChatPurposeConfig(
+        val systemInstruction: String?,
+        val temperature: Double,
+        val maxOutputTokens: Int,
+        val responseMimeType: String? = null
+    )
+
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptProperties.systemInstruction)
         val prompt = Prompt(messages, defaultChatOptions())
@@ -51,26 +60,18 @@ class GeminiAdapter(
             .filter { it.isNotBlank() }
     }
 
-    override suspend fun generateContent(prompt: String, purpose: String): String {
-        val (systemInstruction, temperature, maxTokens) = when (purpose) {
-            "routing" -> Triple(promptProperties.routingInstruction, 0.1, 512)
-            "summarization" -> Triple(null, 0.5, 1024)
-            else -> Triple(promptProperties.systemInstruction, chatModelProperties.temperature.toDouble(), chatModelProperties.maxOutputTokens)
-        }
+    override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
+        val callConfig = resolvePurposeConfig(purpose)
 
         val messages = mutableListOf<Message>()
-        systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
+        callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
         messages += UserMessage(prompt)
 
-        val options = GoogleGenAiChatOptions.builder()
-            .model(chatModelProperties.model)
-            .temperature(temperature)
-            .maxOutputTokens(maxTokens)
-            .build()
+        val options = buildChatOptions(callConfig)
 
-        return try {
+        try {
             val response = chatModel.call(Prompt(messages, options))
-            response.result?.output?.text.orEmpty()
+            response.result?.output?.text.orEmpty().trim()
         } catch (e: Exception) {
             logger.error("Error while calling Gemini API for purpose '$purpose': ${e.message}", e)
             ""
@@ -80,7 +81,7 @@ class GeminiAdapter(
     override suspend fun generateStyledImage(
         personImageFile: ByteArray,
         clothingImageFile: ByteArray
-    ): ByteArray {
+    ): ByteArray = withContext(Dispatchers.IO) {
         val options = GeminiFittingImageOptions(
             personImageFile,
             clothingImageFile,
@@ -95,7 +96,7 @@ class GeminiAdapter(
             ?: throw IllegalStateException("No image generation results returned from Gemini ImageModel.")
         val base64 = generation.output.b64Json
             ?: throw IllegalStateException("Gemini ImageModel returned empty image payload.")
-        return try {
+        try {
             Base64.getDecoder().decode(base64)
         } catch (e: IllegalArgumentException) {
             logger.error("Failed to decode Gemini image payload: ${e.message}", e)
@@ -109,6 +110,37 @@ class GeminiAdapter(
             .temperature(chatModelProperties.temperature.toDouble())
             .maxOutputTokens(chatModelProperties.maxOutputTokens)
             .build()
+    }
+
+    private fun resolvePurposeConfig(purpose: String): ChatPurposeConfig {
+        return when (purpose) {
+            "routing" -> ChatPurposeConfig(
+                systemInstruction = promptProperties.routingInstruction,
+                temperature = 0.1,
+                maxOutputTokens = 512,
+                responseMimeType = APPLICATION_JSON
+            )
+            "summarization" -> ChatPurposeConfig(
+                systemInstruction = null,
+                temperature = 0.5,
+                maxOutputTokens = 1024
+            )
+            else -> ChatPurposeConfig(
+                systemInstruction = promptProperties.systemInstruction,
+                temperature = chatModelProperties.temperature.toDouble(),
+                maxOutputTokens = chatModelProperties.maxOutputTokens
+            )
+        }
+    }
+
+    private fun buildChatOptions(config: ChatPurposeConfig): GoogleGenAiChatOptions {
+        val builder = GoogleGenAiChatOptions.builder()
+            .model(chatModelProperties.model)
+            .temperature(config.temperature)
+            .maxOutputTokens(config.maxOutputTokens)
+
+        config.responseMimeType?.let { builder.responseMimeType(it) }
+        return builder.build()
     }
 
     private fun buildPromptMessages(history: List<ChatMessage>, systemInstruction: String?): List<Message> {
@@ -127,6 +159,8 @@ class GeminiAdapter(
     }
 
     companion object {
+        private const val APPLICATION_JSON = "application/json"
+
         private val AI_FITTING_PROMPT = """
 <prompt>
   <meta>
