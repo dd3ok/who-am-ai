@@ -7,6 +7,7 @@ import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
+import org.springframework.ai.vectorstore.filter.Filter
 import org.springframework.stereotype.Component
 
 /**
