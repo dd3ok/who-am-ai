@@ -40,4 +40,5 @@ out/
 .kotlin
 
 AGENTS.md
-docs/**/*.md
+docs/
+*.http

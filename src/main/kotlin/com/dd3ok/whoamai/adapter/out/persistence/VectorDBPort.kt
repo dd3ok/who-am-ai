@@ -4,6 +4,9 @@ import org.springframework.ai.vectorstore.filter.Filter
 
 interface VectorDBPort {
     suspend fun indexResume(chunks: List<ResumeChunk>): Int
+
+    suspend fun findChunksByIds(ids: Collection<String>): Map<String, String>
+
     suspend fun searchSimilarResumeSections(
         query: String,
         topK: Int,

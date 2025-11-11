@@ -10,11 +10,9 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 @ConfigurationProperties(prefix = "prompts")
 data class PromptProperties(
-    var systemInstruction: String = "",
-    var routingInstruction: String = "",
-    var routingTemplate: String = "",
-    var ragTemplate: String = "",
-    var conversationalTemplate: String = ""
+    var systemTemplate: String = "classpath:/prompts/system.st",
+    var ragTemplate: String = "classpath:/prompts/rag.st",
+    var conversationalTemplate: String = "classpath:/prompts/conversational.st"
 )
 
 /**

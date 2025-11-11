@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.adapter.out.persistence
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -74,6 +75,21 @@ class MongoVectorAdapter(
             ?: run {
                 logger.warn("Resume chunk not found for chunk_id={}. Re-index might be required.", id)
                 null
+            }
+    }
+
+    override suspend fun findChunksByIds(ids: Collection<String>): Map<String, String> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) {
+            return@withContext emptyMap()
+        }
+
+        val query = Query(Criteria.where("metadata.chunk_id").`in`(ids))
+        reactiveMongoTemplate.find(query, ResumeChunkDocument::class.java, collectionName)
+            .collectList()
+            .awaitSingle()
+            .associate { document ->
+                val chunkId = (document.metadata["chunk_id"] as? String).orEmpty().ifBlank { document.id }
+                chunkId to document.content
             }
     }
 

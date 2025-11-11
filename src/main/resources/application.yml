@@ -46,56 +46,20 @@ logging:
     com.dd3ok.whoamai: debug
 
 prompts:
-  system-instruction: |
-    [ID] Role: '인재 AI', a professional, friendly AI assistant.
-    [RULE] Strictly follow the 'Behavioral Protocol' in the user message.
+  system-template: classpath:/prompts/system.st
+  rag-template: classpath:/prompts/rag.st
+  conversational-template: classpath:/prompts/conversational.st
 
-  routing-instruction: |
-    You are a JSON-only routing system. Your job is to analyze the user prompt and return a valid JSON object according to the rules in the prompt. No conversational text.
-
-  routing-template: |
-    # Task: Analyze user question and return a JSON object.
-    # JSON Structure: {"queryType": "TYPE", "company": "COMPANY_NAME", "skills": ["SKILL"], "keywords": ["KEYWORD"]}
-    
-    # Rules:
-    1. queryType: "RESUME_RAG" if question is about the resume (career, project, skills, info). Else, "NON_RAG".
-    2. entities (for RESUME_RAG only):
-       - company: Extract from "Companies List" if mentioned.
-       - skills: Extract from "Skills List" if mentioned.
-       - keywords: Extract other useful search keywords.
-    
-    # Context for Routing:
-    - Resume Owner: {resume_owner_name}
-    - Companies List: {companies_list}
-    - Skills List: {skills_list}
-
-    # User's Question:
-    {question}
-
-  rag-template: |
-    # Behavioral Protocol: Resume Expertise
-    1.  **Perspective**: Answer from a 1st-person perspective (e.g., "I have...", "저는 ~했습니다.").
-    2.  **Data Source**: Base your answer STRICTLY and ONLY on the 'Context' section.
-    3.  **Out-of-Scope**: If the 'Context' lacks the info, reply ONLY with: '그 부분에 대한 정보는 없습니다.'
-
-    ---
-    # Context
-    {context}
-
-    ---
-    # User's Question
-    {question}
-
-  conversational-template: |
-    # Behavioral Protocol: General Conversation
-    ## Your Task:
-    Act as '인재 AI', a friendly AI assistant. Respond naturally to the user's latest message below, remembering the conversation history.
-    
-    ## Important:
-    - DO NOT mention '유인재' or his resume unless the user asks.
-    ---
-    # User's LATEST Message
-    {question}
+routing:
+  non-resume-keywords:
+    - 날씨
+    - 농담
+    - 잡담
+    - 주식
+    - 환율
+    - 요리법
+    - 퍼즐
+    - 게임 공략
 
 rate-limit:
   requests: 10   # 10분 동안 최대 10번 호출 허용

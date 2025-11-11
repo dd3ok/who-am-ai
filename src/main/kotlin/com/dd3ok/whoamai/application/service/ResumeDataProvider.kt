@@ -15,7 +15,7 @@ class ResumeDataProvider(
 
     @PostConstruct
     fun initialize() {
-        this.resume = loadResumePort.load()
+        reload()
     }
 
     override fun getResume(): Resume {
@@ -26,4 +26,9 @@ class ResumeDataProvider(
     }
 
     override fun isInitialized(): Boolean = ::resume.isInitialized && resume.name.isNotBlank()
+
+    override fun reload(): Resume {
+        this.resume = loadResumePort.load()
+        return this.resume
+    }
 }

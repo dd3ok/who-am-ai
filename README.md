@@ -1,6 +1,6 @@
 # Who Am AI — AI 이력서 챗봇
 
-이력서 JSON을 벡터화해 MongoDB Atlas에 저장하고, WebSocket 기반으로 자연어 Q&A를 제공하는 Kotlin/Spring Boot 3 애플리케이션입니다. 규칙 엔진과 LLM 라우터를 조합해 빠르고 신뢰도 높은 답변을 지향합니다.
+이력서 JSON을 벡터화해 MongoDB Atlas에 저장하고, WebSocket 기반으로 자연어 Q&A를 제공하는 Kotlin/Spring Boot 3 애플리케이션입니다. 기본 RAG를 표준 경로로 삼고, 예외 키워드 기반 Intent Decider로 일반 대화를 분기해 일관된 답변을 지향합니다.
 
 ## 한눈에 보기
 - **스택:** Kotlin 1.9 · Spring Boot 3 · Spring AI (Google Gemini) · MongoDB Atlas Vector Search · WebFlux/WebSocket.
@@ -10,8 +10,8 @@
 - **프로세스 문서화:** 모든 작업 기록은 `/docs` (plan/impl/review) 하위에 `YYMMDD-hhmmss-제목.md` 규칙으로 작성합니다. [see: Principles › 파일명 규칙](AGENTS.md#1-principles)
 
 ## 핵심 기능
-- **선 규칙 · 후 LLM:** `ContextRetriever`가 학력/취미/회사명 등 명확한 패턴을 우선 처리하고, 실패 시 `LLMRouter`가 `RESUME_RAG`/`NON_RAG`를 분기해 힌트를 제공합니다.
-- **RAG + 스트리밍:** 규칙/LLM에서 얻은 키워드로 Mongo Atlas 벡터 검색을 수행하고, `ChatService`가 Gemini 응답 토큰을 WebSocket으로 스트리밍합니다.
+- **기본 RAG + 예외 분기:** `QueryIntentDecider`가 일반 대화 키워드를 감지하면 대화 프롬프트로 우회하고, 나머지는 `ContextRetriever` 규칙/벡터 검색을 거쳐 RAG 프롬프트로 처리합니다.
+- **RAG + 스트리밍:** 규칙/Intent 힌트로 Mongo Atlas 벡터 검색을 수행하고, `ChatService`가 Gemini 응답 토큰을 WebSocket으로 스트리밍합니다.
 - **대화 상태 유지:** `ChatHistoryRepository`가 세션별 메시지를 저장하여 후속 질문에서도 맥락을 재사용합니다.
 - **재색인 & 데이터 관리:** `/api/admin/resume/reindex`가 `resume.json`을 다시 청킹/임베딩해 Atlas에 반영합니다.
 - **이미지 AI Fitting:** `/api/ai-fitting`이 인물·의상 이미지를 받아 Gemini Vision API로 스타일 합성 이미지를 생성합니다.
@@ -25,8 +25,8 @@
 
 ### 2. 대화(Generation)
 1. WebSocket `/ws/chat`으로 `{ "uuid": "...", "type": "USER", "content": "경력 알려줘" }` 형태 메시지 수신.
-2. `ContextRetriever` 규칙 매칭 → 성공 시 즉시 컨텍스트 반환.
-3. 실패 시 `LLMRouter`가 라우팅 JSON을 만들고, `MongoVectorAdapter`가 유사 청크를 조회.
+2. `QueryIntentDecider`가 일반 대화 예외 키워드를 검사 → 해당 시 바로 대화 프롬프트 사용.
+3. 기본 경로에서는 `ContextRetriever` 규칙 매칭 → 실패 시 벡터 검색(`MongoVectorAdapter`)으로 컨텍스트 확보.
 4. `ChatService`가 프롬프트(`prompts.rag-template` 또는 `conversational-template`)를 구성해 Gemini 채팅 모델(`gemini-2.5-flash-lite`) 호출.
 5. 생성 토큰을 `StreamChatWebSocketHandler`가 실시간으로 사용자에게 전송.
 
@@ -62,6 +62,7 @@
 ## 운영 & 개발 메모
 - 로그 레벨: `com.dd3ok.whoamai=DEBUG`, 그 외 WARN.
 - Rate limit 조정은 `application.yml`의 `rate-limit.*` 값 변경으로 처리.
+- 프롬프트는 `src/main/resources/prompts/*.st`에 저장하고 `application.yml`에서는 경로만 지정합니다.
 - 문서·구현 절차: Plan → (승인) → Implement 순으로 진행하고 Drift/테스트 시나리오는 `/docs/impl` 문서에 기록합니다.
 - 테스트는 실제 실행 대신 시나리오를 문서화하고, 필요 시 사람만 로컬 스모크 테스트를 수행합니다.
 

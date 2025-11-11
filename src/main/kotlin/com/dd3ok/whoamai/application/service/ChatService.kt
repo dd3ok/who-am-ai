@@ -4,7 +4,8 @@ import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.service.dto.QueryType
-import com.dd3ok.whoamai.common.config.PromptProperties
+import com.dd3ok.whoamai.application.service.dto.RouteDecision
+import com.dd3ok.whoamai.common.util.PromptTemplateService
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
@@ -18,9 +19,9 @@ import org.springframework.stereotype.Service
 class ChatService(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
-    private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
-    private val promptProperties: PromptProperties
+    private val queryIntentDecider: QueryIntentDecider,
+    private val promptTemplateService: PromptTemplateService
 ) : ChatUseCase {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -34,29 +35,33 @@ class ChatService(
     override suspend fun streamChatResponse(message: StreamMessage): Flow<String> {
         val userId = message.uuid
         val userPrompt = message.content
+        val intentDecision = queryIntentDecider.decide(userPrompt)
 
         val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
         val pastHistory = createApiHistoryWindow(domainHistory)
 
-        // 1. ContextRetriever를 먼저 호출하여 규칙 기반 검색을 시도
-        var relevantContexts = contextRetriever.retrieveByRule(userPrompt)
-
-        // 2. 규칙 기반으로 컨텍스트를 찾지 못했다면, 그 때 LLM 라우터와 벡터 검색을 사용
-        if (relevantContexts.isEmpty()) {
-            val routeDecision = llmRouter.route(userPrompt)
-            logger.info("No rule match. LLM Router hint: $routeDecision")
-            if (routeDecision.queryType == QueryType.RESUME_RAG) {
-                relevantContexts = contextRetriever.retrieveByVector(userPrompt, routeDecision)
-            }
-        }
-
-        // 3. 최종적으로 컨텍스트 존재 여부에 따라 프롬프트 결정
-        val finalHistory = if (relevantContexts.isNotEmpty()) {
-            logger.info("Context found. Proceeding with RAG prompt.")
-            createRagPrompt(pastHistory, userPrompt, relevantContexts)
-        } else {
-            logger.info("No context found. Proceeding with conversational prompt.")
+        val finalHistory = if (intentDecision.useGeneralPrompt) {
+            logger.info("Intent classified as general conversation. Skipping RAG pipeline.")
             createConversationalPrompt(pastHistory, userPrompt)
+        } else {
+            val finalRouteDecision = RouteDecision(
+                queryType = QueryType.RESUME_RAG,
+                company = intentDecision.companyHint,
+                skills = intentDecision.skillHints,
+                keywords = intentDecision.keywordHints
+            )
+            var relevantContexts = contextRetriever.retrieveByRule(userPrompt)
+            if (relevantContexts.isEmpty()) {
+                relevantContexts = contextRetriever.retrieveByVector(userPrompt, finalRouteDecision)
+            }
+
+            if (relevantContexts.isNotEmpty()) {
+                logger.info("Context found. Proceeding with RAG prompt.")
+                createRagPrompt(pastHistory, userPrompt, relevantContexts)
+            } else {
+                logger.info("Context missing. Falling back to conversational prompt.")
+                createConversationalPrompt(pastHistory, userPrompt)
+            }
         }
 
         // 4. LLM 호출 및 결과 스트리밍
@@ -85,16 +90,13 @@ class ChatService(
 
     private fun createRagPrompt(history: List<ChatMessage>, userPrompt: String, contexts: List<String>): List<ChatMessage> {
         val contextString = if (contexts.isNotEmpty()) contexts.joinToString("\n---\n") else "관련 정보 없음"
-        val finalUserPrompt = promptProperties.ragTemplate
-            .replace("{context}", contextString)
-            .replace("{question}", userPrompt)
+        val finalUserPrompt = promptTemplateService.buildRagPrompt(contextString, userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
     private fun createConversationalPrompt(history: List<ChatMessage>, userPrompt: String): List<ChatMessage> {
-        val finalUserPrompt = promptProperties.conversationalTemplate
-            .replace("{question}", userPrompt)
+        val finalUserPrompt = promptTemplateService.buildConversationalPrompt(userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }

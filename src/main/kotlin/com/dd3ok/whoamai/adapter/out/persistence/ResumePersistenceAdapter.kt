@@ -35,6 +35,13 @@ class ResumePersistenceAdapter(
         return vectorDBPort.findChunkById(id)
     }
 
+    override suspend fun findContentsByIds(ids: Collection<String>): Map<String, String> {
+        if (ids.isEmpty()) {
+            return emptyMap()
+        }
+        return vectorDBPort.findChunksByIds(ids)
+    }
+
     override suspend fun searchSimilarSections(
         query: String,
         topK: Int,
