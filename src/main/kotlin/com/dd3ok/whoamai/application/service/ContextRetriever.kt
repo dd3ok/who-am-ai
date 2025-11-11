@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
+import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
 import org.springframework.stereotype.Component
@@ -51,7 +52,7 @@ class ContextRetriever(
             normalizedQuery = normalizedQuery,
             condensedQuery = condensedQuery,
             resumeName = resumeName,
-            resumeNameFragments = buildNameFragments(resumeName)
+            resumeNameFragments = NameFragmentExtractor.extract(resume.name)
         )
 
         // 1. Specific project title check
@@ -95,20 +96,23 @@ class ContextRetriever(
         routeDecision.company?.let {
             filterOps.add(filterExpressionBuilder.eq("company", it))
         }
-        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let { skills ->
-            filterOps.add(filterExpressionBuilder.`in`("skills", skills))
+        var skillFilterOp: FilterExpressionBuilder.Op? = null
+        routeDecision.skills?.mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }?.takeIf { it.isNotEmpty() }?.let { skills ->
+            skillFilterOp = filterExpressionBuilder.`in`("skills", skills)
+            filterOps.add(skillFilterOp!!)
         }
 
-        val finalFilter = if (filterOps.isEmpty()) {
-            null
-        } else {
-            filterOps.reduce { acc, op -> filterExpressionBuilder.and(acc, op) }.build()
-        }
+        val finalFilter = buildFilterExpression(filterOps)
 
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
         val finalQuery = "$userPrompt $searchKeywords".trim()
 
-        return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+        var results = resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+        if (results.isEmpty() && skillFilterOp != null) {
+            val fallbackFilter = buildFilterExpression(filterOps.filterNot { it == skillFilterOp })
+            results = resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = fallbackFilter)
+        }
+        return results
     }
 
     private data class RuleContext(
@@ -131,15 +135,12 @@ class ContextRetriever(
         return normalizedQuery.contains(normalizedCandidate) || condensedQuery.contains(condensedCandidate)
     }
 
-    private fun buildNameFragments(resumeName: String): List<String> {
-        if (resumeName.length <= 1) return listOf(resumeName)
-        val normalized = resumeName.replace(whitespaceRegex, "")
-        val fragments = mutableListOf<String>()
-        for (i in normalized.indices) {
-            for (j in i + 2..normalized.length) {
-                fragments.add(normalized.substring(i, j))
-            }
+    private fun buildFilterExpression(ops: List<FilterExpressionBuilder.Op>): Filter.Expression? {
+        if (ops.isEmpty()) return null
+        var current = ops.first()
+        for (index in 1 until ops.size) {
+            current = filterExpressionBuilder.and(current, ops[index])
         }
-        return fragments.distinct()
+        return current.build()
     }
 }

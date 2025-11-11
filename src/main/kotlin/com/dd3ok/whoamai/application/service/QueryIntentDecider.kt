@@ -3,6 +3,7 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.IntentDecision
 import com.dd3ok.whoamai.common.config.RoutingProperties
+import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.springframework.stereotype.Component
 
 /**
@@ -43,8 +44,7 @@ class QueryIntentDecider(
 
         val keywordHints = mutableListOf<String>()
         if (resume.name.isNotBlank()) {
-            val resumeName = resume.name.lowercase()
-            val fragments = buildNameFragments(resumeName)
+            val fragments = NameFragmentExtractor.extract(resume.name)
             if (fragments.any { normalized.contains(it) }) {
                 keywordHints += resume.name
             }
@@ -64,19 +64,6 @@ class QueryIntentDecider(
         return routingProperties.nonResumeKeywords.any { keyword ->
             normalizedPrompt.contains(keyword.lowercase())
         }
-    }
-
-    private fun buildNameFragments(resumeName: String): List<String> {
-        if (resumeName.isBlank()) return emptyList()
-        val normalized = resumeName.replace(whitespaceRegex, "")
-        if (normalized.length <= 1) return listOf(normalized)
-        val fragments = mutableListOf<String>()
-        for (i in normalized.indices) {
-            for (j in i + 2..normalized.length) {
-                fragments.add(normalized.substring(i, j))
-            }
-        }
-        return fragments.distinct()
     }
 
     companion object {
