@@ -4,8 +4,10 @@ import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
+import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
+import org.springframework.ai.vectorstore.filter.Filter
 import org.springframework.stereotype.Component
 
 /**
@@ -19,19 +21,22 @@ class ContextRetriever(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val filterExpressionBuilder = FilterExpressionBuilder()
+    private val whitespaceRegex = Regex("\\s+")
 
-    private val rules: List<(String, String) -> String?> by lazy {
+    private val rules: List<(RuleContext) -> String?> by lazy {
         listOf(
-            { query, name -> if (listOf("누구야", "누구세요", "소개", "자기소개", name).any { query.contains(it) }) ChunkIdGenerator.forSummary() else null },
-            { query, _ -> if (listOf("총 경력", "총경력", "전체경력").any { query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
-            { query, _ -> if (listOf("프로젝트", "project").any { query.contains(it) }) "projects" else null },
-            { query, _ -> if (listOf("경력", "이력", "회사").any { query.contains(it) }) "experiences" else null },
-            { query, _ -> if (listOf("자격증", "certificate").any { query.contains(it) }) ChunkIdGenerator.forCertificates() else null },
-            { query, _ -> if (listOf("관심사", "interest").any { query.contains(it) }) ChunkIdGenerator.forInterests() else null },
-            { query, _ -> if (listOf("기술", "스킬", "스택").any { query.contains(it) }) ChunkIdGenerator.forSkills() else null },
-            { query, _ -> if (listOf("학력", "학교", "대학").any { query.contains(it) }) ChunkIdGenerator.forEducation() else null },
-            { query, _ -> if (listOf("mbti", "성격").any { query.contains(it) }) ChunkIdGenerator.forMbti() else null },
-            { query, _ -> if (listOf("취미", "여가시간").any { query.contains(it) }) ChunkIdGenerator.forHobbies() else null }
+            { ctx ->
+                if (ctx.matchesAny(listOf("누구야", "누구세요", "소개", "소개해", "자기소개", "설명", "알려줘", ctx.resumeName))) ChunkIdGenerator.forSummary() else null
+            },
+            { ctx -> if (ctx.matchesAny(listOf("총 경력", "총경력", "전체경력"))) ChunkIdGenerator.forTotalExperience() else null },
+            { ctx -> if (ctx.matchesAny(listOf("프로젝트", "project"))) "projects" else null },
+            { ctx -> if (ctx.matchesAny(listOf("경력", "이력", "회사"))) "experiences" else null },
+            { ctx -> if (ctx.matchesAny(listOf("자격증", "certificate"))) ChunkIdGenerator.forCertificates() else null },
+            { ctx -> if (ctx.matchesAny(listOf("관심사", "interest"))) ChunkIdGenerator.forInterests() else null },
+            { ctx -> if (ctx.matchesAny(listOf("기술", "스킬", "스택"))) ChunkIdGenerator.forSkills() else null },
+            { ctx -> if (ctx.matchesAny(listOf("학력", "학교", "대학"))) ChunkIdGenerator.forEducation() else null },
+            { ctx -> if (ctx.matchesAny(listOf("mbti", "성격"))) ChunkIdGenerator.forMbti() else null },
+            { ctx -> if (ctx.matchesAny(listOf("취미", "여가시간"))) ChunkIdGenerator.forHobbies() else null }
         )
     }
 
@@ -41,11 +46,18 @@ class ContextRetriever(
      */
     suspend fun retrieveByRule(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
-        val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
+        val normalizedQuery = userPrompt.lowercase()
+        val condensedQuery = normalizedQuery.replace(whitespaceRegex, "")
         val resumeName = resume.name.lowercase()
+        val ruleContext = RuleContext(
+            normalizedQuery = normalizedQuery,
+            condensedQuery = condensedQuery,
+            resumeName = resumeName,
+            resumeNameFragments = NameFragmentExtractor.extract(resume.name)
+        )
 
         // 1. Specific project title check
-        val matchedProject = resume.projects.find { userPrompt.contains(it.title) }
+        val matchedProject = resume.projects.find { normalizedQuery.contains(it.title.lowercase()) }
         if (matchedProject != null) {
             logger.info("Context retrieved by: Specific Project Rule ('${matchedProject.title}').")
             val projectId = ChunkIdGenerator.forProject(matchedProject.title)
@@ -54,15 +66,19 @@ class ContextRetriever(
 
         // 2. General rule-based check
         for (rule in rules) {
-            val result = rule(normalizedQuery, resumeName)
+            val result = rule(ruleContext)
             if (result != null) {
                 logger.info("Context retrieved by: General Rule ('$result').")
                 return when (result) {
-                    "projects" -> resume.projects.mapNotNull {
-                        resumePersistencePort.findContentById(ChunkIdGenerator.forProject(it.title))
+                    "projects" -> {
+                        val projectIds = resume.projects.map { ChunkIdGenerator.forProject(it.title) }
+                        val contentsById = resumePersistencePort.findContentsByIds(projectIds)
+                        projectIds.mapNotNull(contentsById::get)
                     }
-                    "experiences" -> resume.experiences.mapNotNull {
-                        resumePersistencePort.findContentById(ChunkIdGenerator.forExperience(it.company))
+                    "experiences" -> {
+                        val experienceIds = resume.experiences.map { ChunkIdGenerator.forExperience(it.company) }
+                        val contentsById = resumePersistencePort.findContentsByIds(experienceIds)
+                        experienceIds.mapNotNull(contentsById::get)
                     }
                     else -> resumePersistencePort.findContentById(result)?.let { listOf(it) } ?: emptyList()
                 }
@@ -73,27 +89,59 @@ class ContextRetriever(
     }
 
     /**
-     * LLM 라우터의 힌트를 바탕으로 벡터 검색을 수행합니다.
+     * Intent Decider가 전달한 힌트를 바탕으로 벡터 검색을 수행합니다.
      */
     suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> {
-        logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
+        logger.info("No rules matched. Context retrieved by: Vector Search (intent-driven).")
         val filterOps = mutableListOf<FilterExpressionBuilder.Op>()
         routeDecision.company?.let {
             filterOps.add(filterExpressionBuilder.eq("company", it))
         }
-        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let { skills ->
-            filterOps.add(filterExpressionBuilder.`in`("skills", skills))
+        var skillFilterOp: FilterExpressionBuilder.Op? = null
+        routeDecision.skills?.mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }?.takeIf { it.isNotEmpty() }?.let { skills ->
+            skillFilterOp = filterExpressionBuilder.`in`("skills", skills)
+            filterOps.add(skillFilterOp!!)
         }
 
-        val finalFilter = if (filterOps.isEmpty()) {
-            null
-        } else {
-            filterOps.reduce { acc, op -> filterExpressionBuilder.and(acc, op) }.build()
-        }
+        val finalFilter = buildFilterExpression(filterOps)
 
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
         val finalQuery = "$userPrompt $searchKeywords".trim()
 
-        return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+        var results = resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+        if (results.isEmpty() && skillFilterOp != null) {
+            val fallbackFilter = buildFilterExpression(filterOps.filterNot { it == skillFilterOp })
+            results = resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = fallbackFilter)
+        }
+        return results
+    }
+
+    private data class RuleContext(
+        val normalizedQuery: String,
+        val condensedQuery: String,
+        val resumeName: String,
+        val resumeNameFragments: List<String>
+    )
+
+    private fun RuleContext.matchesAny(candidates: List<String>): Boolean =
+        candidates.any { containsKeyword(it) }
+
+    private fun RuleContext.containsKeyword(candidate: String): Boolean {
+        if (candidate.isBlank()) return false
+        val normalizedCandidate = candidate.lowercase()
+        val condensedCandidate = normalizedCandidate.replace(whitespaceRegex, "")
+        if (normalizedCandidate == resumeName) {
+            return resumeNameFragments.any { fragment -> normalizedQuery.contains(fragment) }
+        }
+        return normalizedQuery.contains(normalizedCandidate) || condensedQuery.contains(condensedCandidate)
+    }
+
+    private fun buildFilterExpression(ops: List<FilterExpressionBuilder.Op>): Filter.Expression? {
+        if (ops.isEmpty()) return null
+        var current = ops.first()
+        for (index in 1 until ops.size) {
+            current = filterExpressionBuilder.and(current, ops[index])
+        }
+        return current.build()
     }
 }

@@ -16,14 +16,21 @@ class ManageResumeService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override suspend fun reindexResumeData(): String {
-        if (!resumeProviderPort.isInitialized()) {
-            val errorMessage = "Resume data is not loaded. Cannot perform re-indexing."
+        val latestResume = try {
+            resumeProviderPort.reload()
+        } catch (ex: Exception) {
+            val errorMessage = "Failed to reload resume data before re-indexing: ${ex.message}"
+            logger.error(errorMessage, ex)
+            return errorMessage
+        }
+
+        if (latestResume.name.isBlank()) {
+            val errorMessage = "Resume data is empty after reload. Cannot perform re-indexing."
             logger.error(errorMessage)
             return errorMessage
         }
 
-        val indexedCount = resumePersistencePort.index(resumeProviderPort.getResume())
-
+        val indexedCount = resumePersistencePort.index(latestResume)
         val successMessage = "Resume indexing process finished. Indexed $indexedCount documents."
         logger.info(successMessage)
         return successMessage

@@ -8,6 +8,8 @@ interface ResumePersistencePort {
 
     suspend fun findContentById(id: String): String?
 
+    suspend fun findContentsByIds(ids: Collection<String>): Map<String, String>
+
     suspend fun searchSimilarSections(
         query: String,
         topK: Int,

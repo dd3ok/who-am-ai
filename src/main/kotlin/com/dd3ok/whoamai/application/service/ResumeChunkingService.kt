@@ -22,6 +22,8 @@ class ResumeChunkingService(
         return try {
             val chunks = mutableListOf<ResumeChunk>()
 
+            val companySkills = buildCompanySkillMap(resume)
+
             chunks.add(createSummaryChunk(resume))
             chunks.add(createSkillsChunk(resume))
             chunks.add(createTotalExperienceChunk(resume))
@@ -30,7 +32,7 @@ class ResumeChunkingService(
             createHobbiesChunk(resume)?.let { chunks.add(it) }
             createInterestsChunk(resume)?.let { chunks.add(it) }
             createMbtiChunk(resume)?.let { chunks.add(it) }
-            chunks.addAll(createExperienceChunks(resume))
+            chunks.addAll(createExperienceChunks(resume, companySkills))
             chunks.addAll(createProjectChunks(resume))
 
             logger.info("Translated domain object into ${chunks.size} infrastructure DTOs.")
@@ -141,8 +143,18 @@ class ResumeChunkingService(
         )
     }
 
-    private fun createExperienceChunks(resume: Resume): List<ResumeChunk> {
+    private fun createExperienceChunks(
+        resume: Resume,
+        companySkills: Map<String, List<String>>
+    ): List<ResumeChunk> {
         return resume.experiences.map { exp ->
+            val aggregatedSkills = mutableListOf<String>()
+            aggregatedSkills += companySkills[exp.company].orEmpty()
+            aggregatedSkills += exp.tags
+            val normalizedSkills = aggregatedSkills
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
             val content = """
                 ${exp.company}에서 근무한 경력 정보입니다.
                 근무 기간은 ${exp.period.start}부터 ${exp.period.end}까지이며, ${exp.position}으로 근무했습니다.
@@ -152,9 +164,21 @@ class ResumeChunkingService(
                 type = "experience",
                 content = content,
                 company = exp.company,
+                skills = normalizedSkills.ifEmpty { null },
                 source = objectMapper.convertValue(exp)
             )
         }
+    }
+
+    private fun buildCompanySkillMap(resume: Resume): Map<String, List<String>> {
+        return resume.projects
+            .groupBy { it.company }
+            .mapValues { (_, projects) ->
+                projects.flatMap { it.skills }
+            }
+            .mapValues { (_, skills) ->
+                skills.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            }
     }
 
     private fun createProjectChunks(resume: Resume): List<ResumeChunk> {
