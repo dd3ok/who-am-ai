@@ -1,72 +1,69 @@
-# Who Am AI — AI 이력서 챗봇
+# Who Am AI — AI 이력서 RAG 챗봇
 
-이력서 JSON을 벡터화해 MongoDB Atlas에 저장하고, WebSocket 기반으로 자연어 Q&A를 제공하는 Kotlin/Spring Boot 3 애플리케이션입니다. 규칙 엔진과 LLM 라우터를 조합해 빠르고 신뢰도 높은 답변을 지향합니다.
+Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB Atlas Vector Search에 올리고, WebSocket으로 질의에 답하는 개인화 챗봇입니다. 규칙 기반 검색, LLM 라우팅, RAG를 조합해 정확도가 높은 답을 반환합니다.
 
-## 한눈에 보기
-- **스택:** Kotlin 1.9 · Spring Boot 3 · Spring AI (Google Gemini) · MongoDB Atlas Vector Search · WebFlux/WebSocket.
-- **데이터:** `resume.json` → 청크/임베딩 → `resume_chunks` 컬렉션, 인덱스 정의는 `src/main/resources/atlas-index.json`.
-- **인터페이스:** WebSocket `/ws/chat`, Admin POST `/api/admin/resume/reindex`, AI Fitting POST `/api/ai-fitting`.
-- **환경 변수:** `MONGO_URI`, `GEMINI_API_KEY` (모두 `application.yml`에서 주입).
-- **프로세스 문서화:** 모든 작업 기록은 `/docs` (plan/impl/review) 하위에 `YYMMDD-hhmmss-제목.md` 규칙으로 작성합니다. [see: Principles › 파일명 규칙](AGENTS.md#1-principles)
+> 주의: 현재 저장소는 히스토리에서 `docs/`를 제거했으며, 문서는 `.gitignore`(docs/**/*.md)에 의해 추적되지 않습니다.
 
-## 핵심 기능
-- **선 규칙 · 후 LLM:** `ContextRetriever`가 학력/취미/회사명 등 명확한 패턴을 우선 처리하고, 실패 시 `LLMRouter`가 `RESUME_RAG`/`NON_RAG`를 분기해 힌트를 제공합니다.
-- **RAG + 스트리밍:** 규칙/LLM에서 얻은 키워드로 Mongo Atlas 벡터 검색을 수행하고, `ChatService`가 Gemini 응답 토큰을 WebSocket으로 스트리밍합니다.
-- **대화 상태 유지:** `ChatHistoryRepository`가 세션별 메시지를 저장하여 후속 질문에서도 맥락을 재사용합니다.
-- **재색인 & 데이터 관리:** `/api/admin/resume/reindex`가 `resume.json`을 다시 청킹/임베딩해 Atlas에 반영합니다.
-- **이미지 AI Fitting:** `/api/ai-fitting`이 인물·의상 이미지를 받아 Gemini Vision API로 스타일 합성 이미지를 생성합니다.
-- **안전장치:** AI Fitting은 IP당 `rate-limit.requests`(기본 10) / `rate-limit.minutes`(기본 60) 정책을 적용하며 `?limit=no`로 우회 가능, 전역 CORS/WebSocket 설정 및 헬스체크(`/actuator/health` 대체) 제공.
+## 주요 스택
+- 언어/런타임: Kotlin 1.9+, Spring Boot 3, WebFlux/WebSocket
+- LLM: Spring AI + Google Gemini (chat, vision), 임베딩 `text-embedding-004`
+- 스토리지: MongoDB Atlas Vector Search (`resume_chunks` 컬렉션)
+- 설정/빌드: Gradle, application.yml, atlas-index.json
 
-## 시스템 흐름
-### 1. 학습(Ingestion)
-1. `ResumeChunkingService`가 `resume.json`을 요약/경력/프로젝트 단위로 자릅니다.
-2. `ResumeDataProvider` → Gemini 임베딩(`text-embedding-004`) 생성.
-3. 결과를 `MongoVectorAdapter`가 `resume_chunks` 컬렉션에 저장(필터 필드: `chunk_type`, `company`, `skills`).
+## 아키텍처 & 흐름
+1) **Ingestion (재색인)**  
+`resume.json` → `ResumeChunkingService`로 요약/경력/프로젝트 등 청크 생성 → 임베딩 → `MongoVectorAdapter`가 `resume_chunks`에 저장(`chunk_type`, `company`, `skills`, `indexedAt` 메타).
 
-### 2. 대화(Generation)
-1. WebSocket `/ws/chat`으로 `{ "uuid": "...", "type": "USER", "content": "경력 알려줘" }` 형태 메시지 수신.
-2. `ContextRetriever` 규칙 매칭 → 성공 시 즉시 컨텍스트 반환.
-3. 실패 시 `LLMRouter`가 라우팅 JSON을 만들고, `MongoVectorAdapter`가 유사 청크를 조회.
-4. `ChatService`가 프롬프트(`prompts.rag-template` 또는 `conversational-template`)를 구성해 Gemini 채팅 모델(`gemini-2.5-flash-lite`) 호출.
-5. 생성 토큰을 `StreamChatWebSocketHandler`가 실시간으로 사용자에게 전송.
+2) **Routing**  
+`LLMRouter` 전처리: 정체성/스택 질문 하드블록 → NON_RAG. 슬롯(회사/프로젝트/스킬 등) 감지 시 RAG 후보, 없으면 NON_RAG. fail-safe: 컨텍스트 비면 NON_RAG로 전환.
 
-## 구성요소 & 엔드포인트
-- **WebSocket `/ws/chat`**: JSON 기반 단일 채널, 서버는 순차적으로 사용자 메시지를 읽고 `StreamMessage` 타입으로 응답합니다.
-- **POST `/api/admin/resume/reindex`**: resume 데이터를 다시 읽고 Mongo Atlas에 반영. 성공 문자열에 `finished` 포함 시 200 OK.
-- **POST `/api/ai-fitting` (multipart)**: `personImage`, `clothingImage` 필드 필요. Rate limit 초과 시 429, `?limit=no`로 우회 가능(운영 환경에서만 사용 권장).
-- **HealthcheckController**: `/api/health` (간단 OK 문자열) 제공.
+3) **Context Retrieval**  
+`ContextRetriever` 규칙 매칭(이름/관심사/회사/프로젝트 alias 등) → 컨텍스트 반환. 실패 시 Vector 검색(topK=3 기본, 필터는 값 없으면 제거).
 
-## 로컬 실행 절차
-1. **필수 준비물**: JDK 21+, Docker 미필수, MongoDB Atlas 프로젝트, Google AI Studio 키.
-2. **클론**
-   ```bash
-   git clone <repo>
-   cd who-am-ai
-   ```
-3. **환경 변수 설정**
-   ```bash
-   export MONGO_URI="mongodb+srv://<user>:<pw>@cluster/?retryWrites=true&w=majority"
-   export GEMINI_API_KEY="your-google-genai-key"
-   ```
-4. **Atlas 인덱스 생성**: `resume_chunks` 컬렉션 생성 후 `src/main/resources/atlas-index.json` 내용을 Search Index(JSON Editor)에 붙여 넣어 `vector_index` 생성.
-5. **이력서 데이터 편집**: `src/main/resources/resume.json`을 개인 정보로 갱신.
-6. **애플리케이션 실행**
-   ```bash
-   ./gradlew bootRun
-   ```
-7. **기본 확인**
-   - WebSocket: `ws://localhost:8080/ws/chat` 연결 후 `{"uuid":"demo","type":"USER","content":"학력 알려줘"}` 전송.
-   - Reindex: `POST http://localhost:8080/api/admin/resume/reindex`.
-   - AI Fitting: `POST http://localhost:8080/api/ai-fitting` (multipart, 이미지 2개).
+4) **Generation**  
+`ChatService`가 프롬프트 템플릿(`prompts/*.st`)을 렌더링. RAG는 Markdown 불릿/헤딩으로 응답하도록 지시, 대화용은 페르소나/정체성/스택 고정 안내 포함. 결과를 WebSocket으로 스트리밍.
 
-## 운영 & 개발 메모
-- 로그 레벨: `com.dd3ok.whoamai=DEBUG`, 그 외 WARN.
-- Rate limit 조정은 `application.yml`의 `rate-limit.*` 값 변경으로 처리.
-- 문서·구현 절차: Plan → (승인) → Implement 순으로 진행하고 Drift/테스트 시나리오는 `/docs/impl` 문서에 기록합니다.
-- 테스트는 실제 실행 대신 시나리오를 문서화하고, 필요 시 사람만 로컬 스모크 테스트를 수행합니다.
+5) **AI Fitting**  
+`/api/ai-fitting`에서 인물·의상 이미지를 받아 Gemini Vision(REST)으로 합성 이미지 생성. Rate limit(`rate-limit.*`) 적용.
+
+## 주요 구성요소
+- `PromptTemplateService`/`PromptProvider`: `prompts/*.st` 로딩 및 플레이스홀더 치환
+- `LLMRouter`: 정체성 하드블록 + 슬롯 감지 + 라우팅 프롬프트
+- `ContextRetriever`: 규칙 기반 매칭 후 Vector 검색 (필터 fallback)
+- `MongoVectorAdapter`: Atlas VectorStore index/search
+- `GeminiAdapter`: Chat/Streaming 호출, ImageModel(REST) 래퍼
+- `ResumeChunkingService`: resume.json → 청크 생성
+
+## 엔드포인트
+- WebSocket: `/ws/chat` (StreamMessage JSON)
+- Admin: `POST /api/admin/resume/reindex` (재색인)
+- AI Fitting: `POST /api/ai-fitting` (multipart: `personImage`, `clothingImage`)
+- Health: `/api/health`
+
+## 설정
+- 환경변수: `MONGO_URI`, `GEMINI_API_KEY`
+- Atlas 인덱스: `src/main/resources/atlas-index.json`을 Search Index(JSON Editor)에 붙여 `vector_index` 생성
+- Rate limit: `application.yml`의 `rate-limit.requests`, `rate-limit.minutes`
+
+## 실행 절차
+```bash
+git clone https://github.com/dd3ok/who-am-ai
+cd who-am-ai
+export MONGO_URI="mongodb+srv://<user>:<pw>@cluster/?retryWrites=true&w=majority"
+export GEMINI_API_KEY="<google-genai-key>"
+./gradlew bootRun
+```
+- 재색인: `curl -X POST http://localhost:8080/api/admin/resume/reindex`
+- WebSocket 스모크: `ws://localhost:8080/ws/chat` → `{"uuid":"demo","type":"USER","content":"경력 알려줘"}`
+- AI Fitting: `POST /api/ai-fitting` (multipart로 이미지 2개 업로드)
+
+## 운영/테스트 메모
+- 로그: 라우팅 intent/slots, 검색 topK/필터, 컨텍스트 개수를 DEBUG로 남기면 품질 점검 용이
+- 컨텍스트 비면 즉시 NON_RAG fallback 진행
+- reindex 후 `metadata.indexedAt` 확인으로 반영 여부 점검
+- 정체성/스택 질문은 RAG 미호출, 고정 스택 안내(Repo 링크 포함) 후 도움 제안
 
 ## 향후 개선 아이디어
-- 하이브리드 검색(벡터 + 키워드) 도입으로 특정 키워드 질의 정밀도 개선.
-- Rerank 또는 Score Fusion 추가로 LLM에 전달할 컨텍스트 품질 향상.
-- 응답 평가 파이프라인(Eval harness) 도입으로 변경 영향 추적.
-- Agentic RAG 시나리오 도입해 부족한 답을 보강하는 후속 질의 자동화.
+- MMR/다양성 검색 실험 및 topK 튜닝
+- slot 감지/필터 적용 로그 + 스모크 자동화로 회귀 방지
+- 하이브리드 검색(벡터+키워드) 또는 rerank 도입 시나리오 검토
