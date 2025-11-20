@@ -6,10 +6,13 @@ import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactive.asFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.ai.image.ImageModel
@@ -47,13 +50,17 @@ class GeminiAdapter(
         val systemInstruction: String?,
         val temperature: Double,
         val maxOutputTokens: Int,
-        val responseMimeType: String? = null,
-        val fallbackModel: String? = null
+        val responseMimeType: String? = null
     )
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
-        return streamWithFallback(messages, defaultChatOptions(), chatModelProperties.fallbackModel)
+        val config = ChatPurposeConfig(
+            systemInstruction = null,
+            temperature = chatModelProperties.temperature.toDouble(),
+            maxOutputTokens = chatModelProperties.maxOutputTokens
+        )
+        return streamWithPriorities(messages, config)
     }
 
     override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
@@ -63,19 +70,7 @@ class GeminiAdapter(
         callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
         messages += UserMessage(prompt)
 
-        val primary = buildChatOptions(callConfig, modelOverride = chatModelProperties.model)
-        val result = callChatWithOptions(messages, primary)
-        if (result != null) {
-            return@withContext result
-        }
-
-        val fallbackModel = callConfig.fallbackModel?.takeIf { it.isNotBlank() }
-            ?: chatModelProperties.fallbackModel.takeIf { it.isNotBlank() }
-        if (fallbackModel == null) {
-            return@withContext ""
-        }
-        val fallbackOptions = buildChatOptions(callConfig, modelOverride = fallbackModel)
-        return@withContext callChatWithOptions(messages, fallbackOptions).orEmpty()
+        return@withContext callWithPriorities(messages, callConfig)
     }
 
     override suspend fun generateStyledImage(
@@ -104,41 +99,30 @@ class GeminiAdapter(
         }
     }
 
-    private fun defaultChatOptions(): GoogleGenAiChatOptions {
-        return GoogleGenAiChatOptions.builder()
-            .model(chatModelProperties.model)
-            .temperature(chatModelProperties.temperature.toDouble())
-            .maxOutputTokens(chatModelProperties.maxOutputTokens)
-            .build()
-    }
-
     private fun resolvePurposeConfig(purpose: String): ChatPurposeConfig {
         return when (purpose) {
             "routing" -> ChatPurposeConfig(
                 systemInstruction = promptTemplateService.routingInstruction(),
                 temperature = 0.1,
                 maxOutputTokens = 512,
-                responseMimeType = APPLICATION_JSON,
-                fallbackModel = chatModelProperties.fallbackModel
+                responseMimeType = APPLICATION_JSON
             )
             "summarization" -> ChatPurposeConfig(
                 systemInstruction = null,
                 temperature = 0.5,
-                maxOutputTokens = 1024,
-                fallbackModel = chatModelProperties.fallbackModel
+                maxOutputTokens = 1024
             )
             else -> ChatPurposeConfig(
                 systemInstruction = promptTemplateService.systemInstruction(),
                 temperature = chatModelProperties.temperature.toDouble(),
-                maxOutputTokens = chatModelProperties.maxOutputTokens,
-                fallbackModel = chatModelProperties.fallbackModel
+                maxOutputTokens = chatModelProperties.maxOutputTokens
             )
         }
     }
 
-    private fun buildChatOptions(config: ChatPurposeConfig, modelOverride: String? = null): GoogleGenAiChatOptions {
+    private fun buildChatOptions(config: ChatPurposeConfig, model: String): GoogleGenAiChatOptions {
         val builder = GoogleGenAiChatOptions.builder()
-            .model(modelOverride ?: chatModelProperties.model)
+            .model(model)
             .temperature(config.temperature)
             .maxOutputTokens(config.maxOutputTokens)
 
@@ -153,48 +137,60 @@ class GeminiAdapter(
         return messages
     }
 
-    private fun streamWithFallback(
+    private fun streamWithPriorities(
         messages: List<Message>,
-        primaryOptions: GoogleGenAiChatOptions,
-        fallbackModel: String?
-    ): Flow<String> {
-        val primaryPrompt = Prompt(messages, primaryOptions)
-        return streamingChatModel.stream(primaryPrompt)
-            .asFlow()
-            .map { it.result?.output?.text.orEmpty() }
-            .filter { it.isNotBlank() }
-            .catch { e ->
-                if (isRateLimitException(e) && !fallbackModel.isNullOrBlank()) {
-                    logger.warn("Rate limit hit on model ${primaryOptions.model}. Falling back to $fallbackModel")
-                    val fallbackPrompt = Prompt(messages, GoogleGenAiChatOptions.builder()
-                        .from(primaryOptions)
-                        .model(fallbackModel)
-                        .build())
-                    emitAll(
-                        streamingChatModel.stream(fallbackPrompt)
-                            .asFlow()
-                            .map { it.result?.output?.text.orEmpty() }
-                            .filter { it.isNotBlank() }
-                    )
-                } else {
+        config: ChatPurposeConfig
+    ): Flow<String> = channelFlow {
+        var lastError: Throwable? = null
+        val models = modelPriority()
+        for ((idx, model) in models.withIndex()) {
+            val options = buildChatOptions(config, model)
+            val prompt = Prompt(messages, options)
+            try {
+                streamingChatModel.stream(prompt)
+                    .asFlow()
+                    .mapNotNull { it.result?.output }
+                    .filter { it.text.isNotBlank() }
+                    .collect { generation ->
+                        send(generation.text)
+                    }
+                return@channelFlow
+            } catch (e: Throwable) {
+                lastError = e
+                if (!isRateLimitException(e) || idx == models.lastIndex) {
                     throw e
                 }
-            }
-    }
-
-    private fun callChatWithOptions(messages: List<Message>, options: GoogleGenAiChatOptions): String? {
-        return try {
-            val response = chatModel.call(Prompt(messages, options))
-            response.result?.output?.text.orEmpty().trim()
-        } catch (e: Exception) {
-            if (isRateLimitException(e)) {
-                logger.warn("Rate limit on model ${options.model}: ${e.message}")
-                null
-            } else {
-                logger.error("Error while calling Gemini API (model=${options.model}): ${e.message}", e)
-                null
+                logger.warn("Rate limit on model $model. Trying next model.")
+                delay(RETRY_BACKOFF_MS)
             }
         }
+        lastError?.let { throw it }
+    }
+
+    private fun callWithPriorities(
+        messages: List<Message>,
+        config: ChatPurposeConfig
+    ): String {
+        val models = modelPriority()
+        var lastError: Throwable? = null
+        for ((idx, model) in models.withIndex()) {
+            val options = buildChatOptions(config, model)
+            try {
+                val response = chatModel.call(Prompt(messages, options))
+                val text = response.result?.output?.text.orEmpty().trim()
+                if (text.isNotBlank()) return text
+            } catch (e: Throwable) {
+                lastError = e
+                if (!isRateLimitException(e) || idx == models.lastIndex) {
+                    logger.error("Chat call failed on model $model: ${e.message}", e)
+                    return ""
+                }
+                logger.warn("Rate limit on model $model. Trying next model.")
+                runBlocking { delay(RETRY_BACKOFF_MS) }
+            }
+        }
+        logger.error("All models exhausted. lastError=${lastError?.message}")
+        return ""
     }
 
     private fun isRateLimitException(e: Throwable): Boolean {
@@ -202,7 +198,13 @@ class GeminiAdapter(
         return msg.contains("429") || msg.contains("quota") || msg.contains("rate") || msg.contains("exhausted")
     }
 
-    private fun toAiMessage(chatMessage: ChatMessage): Message {
+    private fun modelPriority(): List<String> {
+        val configured = chatModelProperties.models.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(chatModelProperties.model.takeIf { it.isNotBlank() })
+        return configured
+    }
+
+private fun toAiMessage(chatMessage: ChatMessage): Message {
         return when (chatMessage.role.lowercase()) {
             "system" -> SystemMessage(chatMessage.text)
             "model", "assistant" -> AssistantMessage(chatMessage.text)
@@ -212,6 +214,7 @@ class GeminiAdapter(
 
     companion object {
         private const val APPLICATION_JSON = "application/json"
+        private const val RETRY_BACKOFF_MS = 300L
 
         private val AI_FITTING_PROMPT = """
 <prompt>
