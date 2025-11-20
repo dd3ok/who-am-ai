@@ -6,5 +6,6 @@ data class ResumeChunk(
     val content: String,
     val company: String? = null,
     val skills: List<String>? = null,
-    val source: Map<String, Any>
+    val source: Map<String, Any>,
+    val indexedAt: String = java.time.Instant.now().toString()
 )

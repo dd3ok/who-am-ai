@@ -80,7 +80,8 @@ class MongoVectorAdapter(
     private fun buildMetadata(chunk: ResumeChunk): Map<String, Any> {
         val metadata = mutableMapOf<String, Any>(
             "chunk_type" to chunk.type,
-            "source" to chunk.source
+            "source" to chunk.source,
+            "indexedAt" to chunk.indexedAt
         )
         chunk.company?.let { metadata["company"] = it }
         chunk.skills?.takeIf { it.isNotEmpty() }?.let { metadata["skills"] = it }

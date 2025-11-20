@@ -42,7 +42,11 @@ class ResumeChunkingService(
     }
 
     private fun createSummaryChunk(resume: Resume): ResumeChunk {
-        val summaryContent = "저는 ${resume.name}입니다. ${resume.summary}"
+        val summaryParts = mutableListOf("저는 ${resume.summary}".trim())
+        if (resume.interests.isNotEmpty()) {
+            summaryParts += "최근 관심사는 ${resume.interests.joinToString(", ")} 등입니다."
+        }
+        val summaryContent = summaryParts.joinToString(" ")
         return ResumeChunk(
             id = ChunkIdGenerator.forSummary(),
             type = "summary",
