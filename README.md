@@ -1,12 +1,12 @@
 # Who Am AI — AI 이력서 RAG 챗봇
 
-Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB Atlas Vector Search에 올리고, WebSocket으로 질의에 답하는 개인화 챗봇입니다. 규칙 기반 검색, LLM 라우팅, RAG를 조합해 정확도가 높은 답을 반환합니다.
+Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB Atlas Vector Search에 올리고, WebSocket으로 질의에 답하는 개인화 챗봇입니다.
 
-> 주의: 현재 저장소는 히스토리에서 `docs/`를 제거했으며, 문서는 `.gitignore`(docs/**/*.md)에 의해 추적되지 않습니다.
+규칙 기반 검색, LLM 라우팅, RAG를 조합해 정확도가 높은 답을 반환합니다.
 
 ## 주요 스택
 - 언어/런타임: Kotlin 1.9+, Spring Boot 3, WebFlux/WebSocket
-- LLM: Spring AI + Google Gemini (chat, vision), 임베딩 `text-embedding-004`
+- LLM: Spring AI + Google Gemini 2.5 flash lite, 임베딩 text-embedding-004
 - 스토리지: MongoDB Atlas Vector Search (`resume_chunks` 컬렉션)
 - 설정/빌드: Gradle, application.yml, atlas-index.json
 
