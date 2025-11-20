@@ -9,14 +9,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
-import org.springframework.ai.image.ImageModel
-import org.springframework.ai.image.ImagePrompt
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.messages.Message
 import org.springframework.ai.chat.messages.SystemMessage
@@ -25,9 +22,11 @@ import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions
+import org.springframework.ai.image.ImageModel
+import org.springframework.ai.image.ImagePrompt
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
-import java.util.Base64
+import java.util.*
 
 /**
  * 작업 목적: Google GenAI 텍스트 경로는 Spring AI ChatModel/StreamingChatModel을 사용하고, 이미지 생성은 SDK Client를 사용한다.
@@ -50,6 +49,7 @@ class GeminiAdapter(
         val systemInstruction: String?,
         val temperature: Double,
         val maxOutputTokens: Int,
+        val models: List<String>? = null,
         val responseMimeType: String? = null
     )
 
@@ -73,6 +73,7 @@ class GeminiAdapter(
         return@withContext callWithPriorities(messages, callConfig)
     }
 
+    /** 이미지 피팅 모델에 두 이미지 바이트를 전달해 생성 결과(base64)를 디코딩한다. */
     override suspend fun generateStyledImage(
         personImageFile: ByteArray,
         clothingImageFile: ByteArray
@@ -90,6 +91,9 @@ class GeminiAdapter(
         val generation = response.result
         val base64 = generation.output.b64Json
             ?: throw IllegalStateException("Gemini ImageModel returned empty image payload.")
+        if (base64.isBlank()) {
+            throw IllegalStateException("Gemini ImageModel returned empty image payload.")
+        }
         try {
             Base64.getDecoder().decode(base64)
         } catch (e: IllegalArgumentException) {
@@ -104,6 +108,7 @@ class GeminiAdapter(
                 systemInstruction = promptTemplateService.routingInstruction(),
                 temperature = 0.1,
                 maxOutputTokens = 512,
+                models = routingModelPriority(),
                 responseMimeType = APPLICATION_JSON
             )
             "summarization" -> ChatPurposeConfig(
@@ -136,23 +141,24 @@ class GeminiAdapter(
         return messages
     }
 
+    /** 모델 우선순위를 순회하며 스트리밍 응답을 첫 성공 모델에서 반환한다. */
     private fun streamWithPriorities(
         messages: List<Message>,
         config: ChatPurposeConfig
     ): Flow<String> = channelFlow {
         var lastError: Throwable? = null
-        val models = modelPriority()
+        val models = config.models ?: modelPriority()
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
             val prompt = Prompt(messages, options)
             try {
                 streamingChatModel.stream(prompt)
                     .asFlow()
-                    .mapNotNull { it.result?.output?.text }
-                    .filter { it.isNotBlank() }
-                    .collect {
-                        send(it)
+                    .mapNotNull { aiResponse ->
+                        val text = aiResponse.result.output.text ?: return@mapNotNull null
+                        text.takeIf { it.isNotBlank() }
                     }
+                    .collect { send(it) }
                 return@channelFlow
             } catch (e: Throwable) {
                 lastError = e
@@ -166,11 +172,12 @@ class GeminiAdapter(
         lastError?.let { throw it }
     }
 
+    /** 모델 우선순위를 순회하며 첫 비어있지 않은 텍스트 응답을 반환한다. */
     private fun callWithPriorities(
         messages: List<Message>,
         config: ChatPurposeConfig
     ): String {
-        val models = modelPriority()
+        val models = config.models ?: modelPriority()
         var lastError: Throwable? = null
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
@@ -203,7 +210,14 @@ class GeminiAdapter(
         return configured
     }
 
-private fun toAiMessage(chatMessage: ChatMessage): Message {
+    private fun routingModelPriority(): List<String> {
+        val configured = chatModelProperties.routingModels.takeIf { it.isNotEmpty() }
+        if (configured != null) return configured
+        return listOfNotNull(chatModelProperties.model.takeIf { it.isNotBlank() })
+    }
+
+    /** 도메인 메시지를 Spring AI 메시지 타입으로 치환한다. */
+    private fun toAiMessage(chatMessage: ChatMessage): Message {
         return when (chatMessage.role.lowercase()) {
             "system" -> SystemMessage(chatMessage.text)
             "model", "assistant" -> AssistantMessage(chatMessage.text)

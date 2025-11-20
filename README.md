@@ -6,7 +6,7 @@ Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB
 
 ## 주요 스택
 - 언어/런타임: Kotlin 1.9+, Spring Boot 3, WebFlux/WebSocket
-- LLM: Spring AI + Google Gemini 2.5 flash lite, 임베딩 text-embedding-004
+- LLM: Spring AI + Google Gemini 2.5 (일반: flash → flash-preview fallback, 라우팅: flash-lite → flash-lite-preview fallback), 임베딩 text-embedding-004
 - 스토리지: MongoDB Atlas Vector Search (`resume_chunks` 컬렉션)
 - 설정/빌드: Gradle, application.yml, atlas-index.json
 
@@ -15,13 +15,13 @@ Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB
 `resume.json` → `ResumeChunkingService`로 요약/경력/프로젝트 등 청크 생성 → 임베딩 → `MongoVectorAdapter`가 `resume_chunks`에 저장(`chunk_type`, `company`, `skills`, `indexedAt` 메타).
 
 2) **Routing**  
-`LLMRouter` 전처리: 정체성/스택 질문 하드블록 → NON_RAG. 슬롯(회사/프로젝트/스킬 등) 감지 시 RAG 후보, 없으면 NON_RAG. fail-safe: 컨텍스트 비면 NON_RAG로 전환.
+`LLMRouter` 전처리: 정체성/스택 질문 하드블록 → NON_RAG. 슬롯(회사/프로젝트/스킬 등) 감지 시 RAG 후보, 없으면 NON_RAG. 라우팅 LLM은 `routing-models` 우선순위(flash-lite → flash-lite-preview 등)로 호출. fail-safe: 컨텍스트 비면 NON_RAG로 전환.
 
 3) **Context Retrieval**  
 `ContextRetriever` 규칙 매칭(이름/관심사/회사/프로젝트 alias 등) → 컨텍스트 반환. 실패 시 Vector 검색(topK=3 기본, 필터는 값 없으면 제거).
 
 4) **Generation**  
-`ChatService`가 프롬프트 템플릿(`prompts/*.st`)을 렌더링. RAG는 Markdown 불릿/헤딩으로 응답하도록 지시, 대화용은 페르소나/정체성/스택 고정 안내 포함. 결과를 WebSocket으로 스트리밍.
+`ChatService`가 프롬프트 템플릿(`prompts/*.st`)을 렌더링. RAG는 Markdown 불릿/헤딩으로 응답하도록 지시, 대화용은 페르소나/정체성/스택 고정 안내 포함. 일반 챗 LLM은 `models` 우선순위(flash → flash-preview 등)로 호출해 결과를 WebSocket으로 스트리밍.
 
 5) **AI Fitting**  
 `/api/ai-fitting`에서 인물·의상 이미지를 받아 Gemini Vision(REST)으로 합성 이미지 생성. Rate limit(`rate-limit.*`) 적용.

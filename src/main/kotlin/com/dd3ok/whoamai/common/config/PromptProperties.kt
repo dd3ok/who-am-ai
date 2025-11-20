@@ -26,6 +26,7 @@ data class PromptProperties(
 data class GeminiChatModelProperties(
     var models: List<String> = emptyList(),
     var model: String = "",
+    var routingModels: List<String> = emptyList(),
     var temperature: Float = 0.7f,
     var maxOutputTokens: Int = 8192
 )
