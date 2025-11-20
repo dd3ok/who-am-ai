@@ -10,7 +10,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.runBlocking
@@ -89,7 +88,6 @@ class GeminiAdapter(
         val prompt = ImagePrompt(AI_FITTING_PROMPT, options)
         val response = imageModel.call(prompt)
         val generation = response.result
-            ?: throw IllegalStateException("No image generation results returned from Gemini ImageModel.")
         val base64 = generation.output.b64Json
             ?: throw IllegalStateException("Gemini ImageModel returned empty image payload.")
         try {
@@ -152,8 +150,8 @@ class GeminiAdapter(
                     .asFlow()
                     .mapNotNull { it.result?.output?.text }
                     .filter { it.isNotBlank() }
-                    .collect { generationText ->
-                        send(generationText)
+                    .collect {
+                        send(it)
                     }
                 return@channelFlow
             } catch (e: Throwable) {
@@ -178,7 +176,7 @@ class GeminiAdapter(
             val options = buildChatOptions(config, model)
             try {
                 val response = chatModel.call(Prompt(messages, options))
-                val text = response.result?.output?.text.orEmpty().trim()
+                val text = response.result.output.text.orEmpty().trim()
                 if (text.isNotBlank()) return text
             } catch (e: Throwable) {
                 lastError = e
