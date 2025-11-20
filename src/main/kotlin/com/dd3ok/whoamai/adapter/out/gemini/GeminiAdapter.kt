@@ -150,10 +150,10 @@ class GeminiAdapter(
             try {
                 streamingChatModel.stream(prompt)
                     .asFlow()
-                    .mapNotNull { it.result?.output }
-                    .filter { it.text.isNotBlank() }
-                    .collect { generation ->
-                        send(generation.text)
+                    .mapNotNull { it.result?.output?.text }
+                    .filter { it.isNotBlank() }
+                    .collect { generationText ->
+                        send(generationText)
                     }
                 return@channelFlow
             } catch (e: Throwable) {
