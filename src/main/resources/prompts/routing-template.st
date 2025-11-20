@@ -1,26 +1,24 @@
-# Task: Analyze user question and return a JSON object.
-# JSON Structure: {"queryType": "TYPE", "company": "COMPANY_NAME", "skills": ["SKILL"], "keywords": ["KEYWORD"]}
+### 작업
+- 추가 텍스트 없이 JSON 한 개만 반환한다.
+- 형태: {"queryType":"NON_RAG"|"RESUME_RAG","company":"<회사 또는 null>","skills":["..."],"keywords":["..."]}
 
-# Rules:
-1. queryType: "RESUME_RAG" only if the user asks about resume info (career, project, skills, company, education, certificate, MBTI, interests, hobbies, summary). If not sure, return "NON_RAG".
-2. entities (for RESUME_RAG only):
-   - company: Extract from "Companies List" if mentioned.
-   - skills: Extract from "Skills List" if mentioned.
-   - keywords: Extract other useful search keywords.
+### 규칙
+- 이력서 관련(경력/프로젝트/스킬/회사/학력/자격증/MBTI/관심사/취미/요약)만 RESUME_RAG, 그 외는 NON_RAG.
+- RESUME_RAG일 때:
+  - company: Companies List에서 언급된 회사만.
+  - skills: Skills List에서 언급된 스킬만.
+  - keywords: 그 외 유용 키워드.
+- 애매하면 NON_RAG로.
 
-# Context for Routing:
+### 라우팅 컨텍스트
 - Resume Owner: {resume_owner_name}
 - Companies List: {companies_list}
 - Skills List: {skills_list}
 
-# User's Question:
+### 사용자 질문
 {question}
 
-# Examples (follow strictly):
-# Q: "너는 뭐로 만들어졌어?" -> {"queryType":"NON_RAG"}
-# Q: "gpt야? gemini야?" -> {"queryType":"NON_RAG"}
-# Q: "나는 누구야?" -> {"queryType":"NON_RAG"}
-# Q: "내 이름이 뭐야?" -> {"queryType":"NON_RAG"}
-# Q: "넌 누구야?" -> {"queryType":"NON_RAG"}
-# Q: "지마켓 경력 알려줘" -> {"queryType":"RESUME_RAG","company":"지마켓"}
-# Q: "프로젝트 뭐했어?" -> {"queryType":"RESUME_RAG"}
+### 예시
+- "너는 뭐로 만들어졌어?" -> {"queryType":"NON_RAG"}
+- "지마켓 경력 알려줘" -> {"queryType":"RESUME_RAG","company":"지마켓"}
+- "프로젝트 뭐했어?" -> {"queryType":"RESUME_RAG"}
