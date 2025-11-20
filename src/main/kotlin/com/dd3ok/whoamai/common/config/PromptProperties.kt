@@ -25,6 +25,7 @@ data class PromptProperties(
 @ConfigurationProperties(prefix = "spring.ai.google.genai.chat.options")
 data class GeminiChatModelProperties(
     var model: String = "",
+    var fallbackModel: String = "",
     var temperature: Float = 0.7f,
     var maxOutputTokens: Int = 8192
 )

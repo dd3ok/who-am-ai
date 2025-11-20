@@ -47,17 +47,13 @@ class GeminiAdapter(
         val systemInstruction: String?,
         val temperature: Double,
         val maxOutputTokens: Int,
-        val responseMimeType: String? = null
+        val responseMimeType: String? = null,
+        val fallbackModel: String? = null
     )
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
-        val prompt = Prompt(messages, defaultChatOptions())
-
-        return streamingChatModel.stream(prompt)
-            .asFlow()
-            .map { it.result?.output?.text.orEmpty() }
-            .filter { it.isNotBlank() }
+        return streamWithFallback(messages, defaultChatOptions(), chatModelProperties.fallbackModel)
     }
 
     override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
@@ -67,15 +63,19 @@ class GeminiAdapter(
         callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
         messages += UserMessage(prompt)
 
-        val options = buildChatOptions(callConfig)
-
-        try {
-            val response = chatModel.call(Prompt(messages, options))
-            response.result?.output?.text.orEmpty().trim()
-        } catch (e: Exception) {
-            logger.error("Error while calling Gemini API for purpose '$purpose': ${e.message}", e)
-            ""
+        val primary = buildChatOptions(callConfig, modelOverride = chatModelProperties.model)
+        val result = callChatWithOptions(messages, primary)
+        if (result != null) {
+            return@withContext result
         }
+
+        val fallbackModel = callConfig.fallbackModel?.takeIf { it.isNotBlank() }
+            ?: chatModelProperties.fallbackModel.takeIf { it.isNotBlank() }
+        if (fallbackModel == null) {
+            return@withContext ""
+        }
+        val fallbackOptions = buildChatOptions(callConfig, modelOverride = fallbackModel)
+        return@withContext callChatWithOptions(messages, fallbackOptions).orEmpty()
     }
 
     override suspend fun generateStyledImage(
@@ -118,24 +118,27 @@ class GeminiAdapter(
                 systemInstruction = promptTemplateService.routingInstruction(),
                 temperature = 0.1,
                 maxOutputTokens = 512,
-                responseMimeType = APPLICATION_JSON
+                responseMimeType = APPLICATION_JSON,
+                fallbackModel = chatModelProperties.fallbackModel
             )
             "summarization" -> ChatPurposeConfig(
                 systemInstruction = null,
                 temperature = 0.5,
-                maxOutputTokens = 1024
+                maxOutputTokens = 1024,
+                fallbackModel = chatModelProperties.fallbackModel
             )
             else -> ChatPurposeConfig(
                 systemInstruction = promptTemplateService.systemInstruction(),
                 temperature = chatModelProperties.temperature.toDouble(),
-                maxOutputTokens = chatModelProperties.maxOutputTokens
+                maxOutputTokens = chatModelProperties.maxOutputTokens,
+                fallbackModel = chatModelProperties.fallbackModel
             )
         }
     }
 
-    private fun buildChatOptions(config: ChatPurposeConfig): GoogleGenAiChatOptions {
+    private fun buildChatOptions(config: ChatPurposeConfig, modelOverride: String? = null): GoogleGenAiChatOptions {
         val builder = GoogleGenAiChatOptions.builder()
-            .model(chatModelProperties.model)
+            .model(modelOverride ?: chatModelProperties.model)
             .temperature(config.temperature)
             .maxOutputTokens(config.maxOutputTokens)
 
@@ -148,6 +151,55 @@ class GeminiAdapter(
         systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
         history.mapTo(messages, ::toAiMessage)
         return messages
+    }
+
+    private fun streamWithFallback(
+        messages: List<Message>,
+        primaryOptions: GoogleGenAiChatOptions,
+        fallbackModel: String?
+    ): Flow<String> {
+        val primaryPrompt = Prompt(messages, primaryOptions)
+        return streamingChatModel.stream(primaryPrompt)
+            .asFlow()
+            .map { it.result?.output?.text.orEmpty() }
+            .filter { it.isNotBlank() }
+            .catch { e ->
+                if (isRateLimitException(e) && !fallbackModel.isNullOrBlank()) {
+                    logger.warn("Rate limit hit on model ${primaryOptions.model}. Falling back to $fallbackModel")
+                    val fallbackPrompt = Prompt(messages, GoogleGenAiChatOptions.builder()
+                        .from(primaryOptions)
+                        .model(fallbackModel)
+                        .build())
+                    emitAll(
+                        streamingChatModel.stream(fallbackPrompt)
+                            .asFlow()
+                            .map { it.result?.output?.text.orEmpty() }
+                            .filter { it.isNotBlank() }
+                    )
+                } else {
+                    throw e
+                }
+            }
+    }
+
+    private fun callChatWithOptions(messages: List<Message>, options: GoogleGenAiChatOptions): String? {
+        return try {
+            val response = chatModel.call(Prompt(messages, options))
+            response.result?.output?.text.orEmpty().trim()
+        } catch (e: Exception) {
+            if (isRateLimitException(e)) {
+                logger.warn("Rate limit on model ${options.model}: ${e.message}")
+                null
+            } else {
+                logger.error("Error while calling Gemini API (model=${options.model}): ${e.message}", e)
+                null
+            }
+        }
+    }
+
+    private fun isRateLimitException(e: Throwable): Boolean {
+        val msg = e.message?.lowercase().orEmpty()
+        return msg.contains("429") || msg.contains("quota") || msg.contains("rate") || msg.contains("exhausted")
     }
 
     private fun toAiMessage(chatMessage: ChatMessage): Message {
