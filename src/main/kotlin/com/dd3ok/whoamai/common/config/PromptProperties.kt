@@ -4,17 +4,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Configuration
 
 /**
- * 작업 목적: 프롬프트 템플릿 및 시스템 지침을 외부 설정으로 주입한다.
- * 주요 로직: `prompts` 네임스페이스에서 문자열 값을 로드하여 도메인 서비스가 재사용 가능하도록 제공한다.
+ * 작업 목적: 프롬프트 텍스트를 파일 경로 단위로 설정에서 로드한다.
+ * 주요 로직: `prompts` 네임스페이스에 정의된 리소스 경로를 바인딩한다.
  */
 @Configuration
 @ConfigurationProperties(prefix = "prompts")
 data class PromptProperties(
-    var systemInstruction: String = "",
-    var routingInstruction: String = "",
-    var routingTemplate: String = "",
-    var ragTemplate: String = "",
-    var conversationalTemplate: String = ""
+    var systemPath: String = "",
+    var routingInstructionPath: String = "",
+    var routingTemplatePath: String = "",
+    var ragTemplatePath: String = "",
+    var conversationalTemplatePath: String = ""
 )
 
 /**

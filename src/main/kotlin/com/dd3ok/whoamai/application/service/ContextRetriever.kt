@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
+import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
 import org.springframework.stereotype.Component
@@ -20,18 +21,23 @@ class ContextRetriever(
     private val logger = LoggerFactory.getLogger(javaClass)
     private val filterExpressionBuilder = FilterExpressionBuilder()
 
-    private val rules: List<(String, String) -> String?> by lazy {
+    private val rules: List<(RuleContext) -> String?> by lazy {
         listOf(
-            { query, name -> if (listOf("누구야", "누구세요", "소개", "자기소개", name).any { query.contains(it) }) ChunkIdGenerator.forSummary() else null },
-            { query, _ -> if (listOf("총 경력", "총경력", "전체경력").any { query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
-            { query, _ -> if (listOf("프로젝트", "project").any { query.contains(it) }) "projects" else null },
-            { query, _ -> if (listOf("경력", "이력", "회사").any { query.contains(it) }) "experiences" else null },
-            { query, _ -> if (listOf("자격증", "certificate").any { query.contains(it) }) ChunkIdGenerator.forCertificates() else null },
-            { query, _ -> if (listOf("관심사", "interest").any { query.contains(it) }) ChunkIdGenerator.forInterests() else null },
-            { query, _ -> if (listOf("기술", "스킬", "스택").any { query.contains(it) }) ChunkIdGenerator.forSkills() else null },
-            { query, _ -> if (listOf("학력", "학교", "대학").any { query.contains(it) }) ChunkIdGenerator.forEducation() else null },
-            { query, _ -> if (listOf("mbti", "성격").any { query.contains(it) }) ChunkIdGenerator.forMbti() else null },
-            { query, _ -> if (listOf("취미", "여가시간").any { query.contains(it) }) ChunkIdGenerator.forHobbies() else null }
+            { ctx ->
+                val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
+                if (matchesIntro || NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)) {
+                    ChunkIdGenerator.forSummary()
+                } else null
+            },
+            { ctx -> if (TOTAL_EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
+            { ctx -> if (PROJECT_KEYWORDS.any { ctx.query.contains(it) }) "projects" else null },
+            { ctx -> if (EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) "experiences" else null },
+            { ctx -> if (CERTIFICATE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forCertificates() else null },
+            { ctx -> if (INTEREST_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forInterests() else null },
+            { ctx -> if (SKILL_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forSkills() else null },
+            { ctx -> if (EDU_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forEducation() else null },
+            { ctx -> if (PERSONALITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forMbti() else null },
+            { ctx -> if (HOBBY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forHobbies() else null }
         )
     }
 
@@ -42,7 +48,11 @@ class ContextRetriever(
     suspend fun retrieveByRule(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
-        val resumeName = resume.name.lowercase()
+        if (isSelfIdentityPrompt(normalizedQuery)) {
+            logger.info("Self-identity prompt detected. Skipping rule-based RAG.")
+            return emptyList()
+        }
+        val nameFragments = NameFragmentExtractor.extract(resume.name)
 
         // 1. Specific project title check
         val matchedProject = resume.projects.find { userPrompt.contains(it.title) }
@@ -53,8 +63,9 @@ class ContextRetriever(
         }
 
         // 2. General rule-based check
+        val ctx = RuleContext(normalizedQuery, nameFragments)
         for (rule in rules) {
-            val result = rule(normalizedQuery, resumeName)
+            val result = rule(ctx)
             if (result != null) {
                 logger.info("Context retrieved by: General Rule ('$result').")
                 return when (result) {
@@ -96,4 +107,28 @@ class ContextRetriever(
 
         return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
     }
+}
+
+private data class RuleContext(
+    val query: String,
+    val nameFragments: Set<String>
+)
+
+private fun normalizedKeywords(vararg keywords: String): List<String> =
+    keywords.map { it.replace(Regex("\\s+"), "").lowercase() }
+
+private val INTRO_KEYWORDS = normalizedKeywords("누구야", "누구세요", "소개", "자기소개", "소개해줘")
+private val TOTAL_EXPERIENCE_KEYWORDS = normalizedKeywords("총 경력", "총경력", "전체경력")
+private val PROJECT_KEYWORDS = normalizedKeywords("프로젝트", "project")
+private val EXPERIENCE_KEYWORDS = normalizedKeywords("경력", "이력", "회사")
+private val CERTIFICATE_KEYWORDS = normalizedKeywords("자격증", "certificate")
+private val INTEREST_KEYWORDS = normalizedKeywords("관심사", "관심있는", "관심있는게", "관심", "흥미", "좋아하는", "관심분야", "관심있는분야")
+private val SKILL_KEYWORDS = normalizedKeywords("기술", "스킬", "스택")
+private val EDU_KEYWORDS = normalizedKeywords("학력", "학교", "대학")
+private val PERSONALITY_KEYWORDS = normalizedKeywords("mbti", "성격")
+private val HOBBY_KEYWORDS = normalizedKeywords("취미", "여가시간")
+
+private fun isSelfIdentityPrompt(normalizedQuery: String): Boolean {
+    val identityTokens = listOf("너는", "넌", "누구야", "누구니", "너뭐", "너무엇", "뭐로만들", "만들어졌")
+    return identityTokens.any { normalizedQuery.contains(it) }
 }

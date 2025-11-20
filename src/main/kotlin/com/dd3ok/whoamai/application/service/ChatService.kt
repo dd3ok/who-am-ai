@@ -4,7 +4,7 @@ import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.service.dto.QueryType
-import com.dd3ok.whoamai.common.config.PromptProperties
+import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
@@ -20,7 +20,7 @@ class ChatService(
     private val chatHistoryRepository: ChatHistoryRepository,
     private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
-    private val promptProperties: PromptProperties
+    private val promptTemplateService: PromptProvider
 ) : ChatUseCase {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -85,16 +85,13 @@ class ChatService(
 
     private fun createRagPrompt(history: List<ChatMessage>, userPrompt: String, contexts: List<String>): List<ChatMessage> {
         val contextString = if (contexts.isNotEmpty()) contexts.joinToString("\n---\n") else "관련 정보 없음"
-        val finalUserPrompt = promptProperties.ragTemplate
-            .replace("{context}", contextString)
-            .replace("{question}", userPrompt)
+        val finalUserPrompt = promptTemplateService.renderRagTemplate(contextString, userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
     private fun createConversationalPrompt(history: List<ChatMessage>, userPrompt: String): List<ChatMessage> {
-        val finalUserPrompt = promptProperties.conversationalTemplate
-            .replace("{question}", userPrompt)
+        val finalUserPrompt = promptTemplateService.renderConversationalTemplate(userPrompt)
 
         return history + ChatMessage(role = "user", text = finalUserPrompt)
     }

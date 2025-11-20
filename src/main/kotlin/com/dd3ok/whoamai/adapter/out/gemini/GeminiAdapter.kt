@@ -3,7 +3,7 @@ package com.dd3ok.whoamai.adapter.out.gemini
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
-import com.dd3ok.whoamai.common.config.PromptProperties
+import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -34,9 +34,9 @@ import java.util.Base64
 class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
     private val chatModel: ChatModel,
-    private val promptProperties: PromptProperties,
     private val chatModelProperties: GeminiChatModelProperties,
     private val imageModelProperties: GeminiImageModelProperties,
+    private val promptTemplateService: PromptProvider,
     @Qualifier("geminiAIFittingImageModel")
     private val imageModel: ImageModel
 ) : GeminiPort {
@@ -51,7 +51,7 @@ class GeminiAdapter(
     )
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
-        val messages = buildPromptMessages(history, promptProperties.systemInstruction)
+        val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
         val prompt = Prompt(messages, defaultChatOptions())
 
         return streamingChatModel.stream(prompt)
@@ -115,7 +115,7 @@ class GeminiAdapter(
     private fun resolvePurposeConfig(purpose: String): ChatPurposeConfig {
         return when (purpose) {
             "routing" -> ChatPurposeConfig(
-                systemInstruction = promptProperties.routingInstruction,
+                systemInstruction = promptTemplateService.routingInstruction(),
                 temperature = 0.1,
                 maxOutputTokens = 512,
                 responseMimeType = APPLICATION_JSON
@@ -126,7 +126,7 @@ class GeminiAdapter(
                 maxOutputTokens = 1024
             )
             else -> ChatPurposeConfig(
-                systemInstruction = promptProperties.systemInstruction,
+                systemInstruction = promptTemplateService.systemInstruction(),
                 temperature = chatModelProperties.temperature.toDouble(),
                 maxOutputTokens = chatModelProperties.maxOutputTokens
             )
