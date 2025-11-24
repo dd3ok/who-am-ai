@@ -105,7 +105,25 @@ class ContextRetriever(
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
         val finalQuery = "$userPrompt $searchKeywords".trim()
 
-        return resumePersistencePort.searchSimilarSections(finalQuery, topK = 3, filter = finalFilter)
+        val retrieved = resumePersistencePort.searchSimilarSections(finalQuery, topK = 10, filter = finalFilter)
+        return rerankByHeuristic(finalQuery, retrieved, 3)
+    }
+
+    /** 간단한 질의 토큰 교집합 기반 리랭크로 가장 관련도 높은 컨텍스트를 우선 선택한다. */
+    private fun rerankByHeuristic(query: String, contents: List<String>, limit: Int): List<String> {
+        if (contents.isEmpty()) return contents
+        val tokens = query.lowercase().split(" ", "\n", "\t").filter { it.isNotBlank() }.toSet()
+        if (tokens.isEmpty()) return contents.take(limit)
+
+        return contents
+            .map { content ->
+                val lowered = content.lowercase()
+                val matchCount = tokens.count { lowered.contains(it) }
+                content to matchCount
+            }
+            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenByDescending { it.first.length })
+            .map { it.first }
+            .take(limit)
     }
 }
 

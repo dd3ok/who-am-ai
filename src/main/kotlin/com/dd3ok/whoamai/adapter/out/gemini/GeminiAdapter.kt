@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.ai.chat.messages.AssistantMessage
@@ -173,7 +172,7 @@ class GeminiAdapter(
     }
 
     /** 모델 우선순위를 순회하며 첫 비어있지 않은 텍스트 응답을 반환한다. */
-    private fun callWithPriorities(
+    private suspend fun callWithPriorities(
         messages: List<Message>,
         config: ChatPurposeConfig
     ): String {
@@ -192,7 +191,7 @@ class GeminiAdapter(
                     return ""
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
-                runBlocking { delay(RETRY_BACKOFF_MS) }
+                delay(RETRY_BACKOFF_MS)
             }
         }
         logger.error("All models exhausted. lastError=${lastError?.message}")

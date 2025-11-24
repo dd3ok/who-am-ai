@@ -41,7 +41,8 @@ class StreamChatWebSocketHandler(
                     session.send(responseFlow).awaitFirstOrNull()
                 } catch (e: Exception) {
                     logger.error("Failed to process message from session ${session.id}: ${e.message}", e)
-                    // session.send(Mono.just(session.textMessage("Invalid message format."))).awaitFirstOrNull()
+                    val errorNotice = "일시적인 오류가 발생했습니다. 다시 시도해주세요."
+                    session.send(Mono.just(session.textMessage(errorNotice))).awaitFirstOrNull()
                 }
             }
     }
