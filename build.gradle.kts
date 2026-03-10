@@ -1,7 +1,7 @@
 plugins {
     kotlin("jvm") version "1.9.25"
     kotlin("plugin.spring") version "1.9.25"
-    id("org.springframework.boot") version "3.5.7"
+    id("org.springframework.boot") version "3.5.10"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -16,15 +16,15 @@ java {
 
 repositories {
     mavenCentral()
-    maven("https://repo.spring.io/milestone")
 }
 
 dependencies {
     // Spring
     implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     // Spring AI
-    implementation(platform("org.springframework.ai:spring-ai-bom:1.1.0-M4"))
+    implementation(platform("org.springframework.ai:spring-ai-bom:1.1.2"))
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai-embedding")
     implementation("org.springframework.ai:spring-ai-starter-vector-store-mongodb-atlas")

@@ -147,10 +147,15 @@ class ResumeChunkingService(
 
     private fun createExperienceChunks(resume: Resume): List<ResumeChunk> {
         return resume.experiences.map { exp ->
-            val content = """
-                ${exp.company}에서 근무한 경력 정보입니다.
-                근무 기간은 ${exp.period.start}부터 ${exp.period.end}까지이며, ${exp.position}으로 근무했습니다.
-            """.trimIndent()
+            val contentParts = mutableListOf(
+                "${exp.company}에서 근무한 경력 정보입니다.",
+                "근무 기간은 ${exp.period.start}부터 ${exp.period.end}까지이며, ${exp.position}으로 근무했습니다."
+            )
+            if (exp.tags.isNotEmpty()) {
+                contentParts += "주요 업무/관심 영역은 ${exp.tags.joinToString(", ")} 입니다."
+            }
+            contentParts += "해당 경력과 연결된 역할, 책임, 협업 방식, 문제 해결 경험에 대한 질문에는 이 정보를 우선 참고해주세요."
+            val content = contentParts.joinToString(" ")
             ResumeChunk(
                 id = ChunkIdGenerator.forExperience(exp.company),
                 type = "experience",
@@ -163,13 +168,21 @@ class ResumeChunkingService(
 
     private fun createProjectChunks(resume: Resume): List<ResumeChunk> {
         return resume.projects.map { proj ->
-            val content = """
-                프로젝트 '${proj.title}'에 대한 상세 정보입니다.
-                - 소속: ${proj.company}
-                - 기간: ${proj.period.start} ~ ${proj.period.end}
-                - 설명: ${proj.description}
-                - 주요 기술: ${proj.skills.joinToString(", ")}
-            """.trimIndent()
+            val contentParts = mutableListOf(
+                "프로젝트 '${proj.title}'에 대한 상세 정보입니다.",
+                "소속은 ${proj.company}이며, 기간은 ${proj.period.start}부터 ${proj.period.end}까지입니다."
+            )
+            proj.description.takeIf { it.isNotBlank() }?.let { description ->
+                contentParts += "프로젝트 설명은 다음과 같습니다: $description"
+            }
+            if (proj.skills.isNotEmpty()) {
+                contentParts += "주요 기술은 ${proj.skills.joinToString(", ")} 입니다."
+            }
+            if (proj.tags.isNotEmpty()) {
+                contentParts += "핵심 주제와 업무 맥락은 ${proj.tags.joinToString(", ")} 입니다."
+            }
+            contentParts += "이 프로젝트와 관련된 역할, 성과, 트러블슈팅, 품질, 보안, 아키텍처 질문에는 이 정보를 우선 참고해주세요."
+            val content = contentParts.joinToString(" ")
             ResumeChunk(
                 id = ChunkIdGenerator.forProject(proj.title),
                 type = "project",

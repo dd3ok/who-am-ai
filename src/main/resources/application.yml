@@ -7,21 +7,22 @@ spring:
   ai:
     model:
       chat: google-genai
-      embedding: google-genai
+      embedding:
+        text: google-genai
     google:
       genai:
         api-key: ${GEMINI_API_KEY}
         chat:
           options:
             models: [gemini-2.5-flash-lite, gemini-2.5-flash-lite-preview-09-2025]
-            routing-models: [gemini-2.5-flash-lite, gemini-2.5-flash-lite-preview-09-2025]
             temperature: 0.75
             max-output-tokens: 8192
         embedding:
           api-key: ${GEMINI_API_KEY}
-          options:
-            model: text-embedding-004
-            ./mtask-type: RETRIEVAL_DOCUMENT
+          text:
+            options:
+              model: text-embedding-004
+              task-type: RETRIEVAL_DOCUMENT
         image:
           base-url: https://generativelanguage.googleapis.com
           generate-path: "/v1/models/{model}:generateContent"
@@ -46,6 +47,12 @@ logging:
     org.springframework: WARN
     com.dd3ok.whoamai: debug
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
 prompts:
   system-path: classpath:prompts/system.st
   routing-instruction-path: classpath:prompts/routing-instruction.st
@@ -59,3 +66,8 @@ rate-limit:
   bypass-parameter:
     name: limit # 우회에 사용할 파라미터 이름
     value: no   # 우회 파라미터의 값
+
+rag:
+  search:
+    metadata-filter-enabled: true
+    similarity-threshold: 0.65

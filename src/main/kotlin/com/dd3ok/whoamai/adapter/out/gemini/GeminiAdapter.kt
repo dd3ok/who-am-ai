@@ -48,8 +48,7 @@ class GeminiAdapter(
         val systemInstruction: String?,
         val temperature: Double,
         val maxOutputTokens: Int,
-        val models: List<String>? = null,
-        val responseMimeType: String? = null
+        val models: List<String>? = null
     )
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
@@ -63,7 +62,7 @@ class GeminiAdapter(
     }
 
     override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
-        val callConfig = resolvePurposeConfig(purpose)
+        val callConfig = defaultConfig()
 
         val messages = mutableListOf<Message>()
         callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
@@ -101,26 +100,12 @@ class GeminiAdapter(
         }
     }
 
-    private fun resolvePurposeConfig(purpose: String): ChatPurposeConfig {
-        return when (purpose) {
-            "routing" -> ChatPurposeConfig(
-                systemInstruction = promptTemplateService.routingInstruction(),
-                temperature = 0.1,
-                maxOutputTokens = 512,
-                models = routingModelPriority(),
-                responseMimeType = APPLICATION_JSON
-            )
-            "summarization" -> ChatPurposeConfig(
-                systemInstruction = null,
-                temperature = 0.5,
-                maxOutputTokens = 1024
-            )
-            else -> ChatPurposeConfig(
-                systemInstruction = promptTemplateService.systemInstruction(),
-                temperature = chatModelProperties.temperature.toDouble(),
-                maxOutputTokens = chatModelProperties.maxOutputTokens
-            )
-        }
+    private fun defaultConfig(): ChatPurposeConfig {
+        return ChatPurposeConfig(
+            systemInstruction = promptTemplateService.systemInstruction(),
+            temperature = chatModelProperties.temperature.toDouble(),
+            maxOutputTokens = chatModelProperties.maxOutputTokens
+        )
     }
 
     private fun buildChatOptions(config: ChatPurposeConfig, model: String): GoogleGenAiChatOptions {
@@ -129,7 +114,6 @@ class GeminiAdapter(
             .temperature(config.temperature)
             .maxOutputTokens(config.maxOutputTokens)
 
-        config.responseMimeType?.let { builder.responseMimeType(it) }
         return builder.build()
     }
 
@@ -154,7 +138,7 @@ class GeminiAdapter(
                 streamingChatModel.stream(prompt)
                     .asFlow()
                     .mapNotNull { aiResponse ->
-                        val text = aiResponse.result.output.text ?: return@mapNotNull null
+                        val text = aiResponse.result?.output?.text ?: return@mapNotNull null
                         text.takeIf { it.isNotBlank() }
                     }
                     .collect { send(it) }
@@ -209,12 +193,6 @@ class GeminiAdapter(
         return configured
     }
 
-    private fun routingModelPriority(): List<String> {
-        val configured = chatModelProperties.routingModels.takeIf { it.isNotEmpty() }
-        if (configured != null) return configured
-        return listOfNotNull(chatModelProperties.model.takeIf { it.isNotBlank() })
-    }
-
     /** 도메인 메시지를 Spring AI 메시지 타입으로 치환한다. */
     private fun toAiMessage(chatMessage: ChatMessage): Message {
         return when (chatMessage.role.lowercase()) {
@@ -225,7 +203,6 @@ class GeminiAdapter(
     }
 
     companion object {
-        private const val APPLICATION_JSON = "application/json"
         private const val RETRY_BACKOFF_MS = 300L
 
         private val AI_FITTING_PROMPT = """

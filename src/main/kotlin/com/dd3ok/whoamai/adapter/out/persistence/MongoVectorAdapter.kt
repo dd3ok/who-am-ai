@@ -1,9 +1,11 @@
 package com.dd3ok.whoamai.adapter.out.persistence
-
+	
+import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.ai.document.Document as AiDocument
 import org.springframework.ai.vectorstore.SearchRequest
 import org.springframework.ai.vectorstore.filter.Filter
@@ -22,7 +24,8 @@ import org.springframework.stereotype.Component
 class MongoVectorAdapter(
     private val vectorStore: MongoDBAtlasVectorStore,
     private val vectorStoreProperties: MongoDBAtlasVectorStoreProperties,
-    private val reactiveMongoTemplate: ReactiveMongoTemplate
+    private val reactiveMongoTemplate: ReactiveMongoTemplate,
+    @Value("\${rag.search.similarity-threshold:0.65}") private val similarityThreshold: Double
 ) : VectorDBPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -55,15 +58,26 @@ class MongoVectorAdapter(
     override suspend fun searchSimilarResumeSections(
         query: String,
         topK: Int,
-        filter: Filter.Expression?
-    ): List<String> = withContext(Dispatchers.IO) {
+        filter: Filter.Expression?,
+        similarityThreshold: Double?
+    ): List<ResumeSearchResult> = withContext(Dispatchers.IO) {
         val builder = SearchRequest.builder()
             .query(query)
             .topK(topK)
+            .similarityThreshold(similarityThreshold ?: this@MongoVectorAdapter.similarityThreshold)
         filter?.let { builder.filterExpression(it) }
 
         vectorStore.similaritySearch(builder.build())
-            .mapNotNull { it.text }
+            .mapNotNull { document ->
+                val content = document.text?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val chunkId = document.metadata["chunk_id"] as? String ?: return@mapNotNull null
+                val chunkType = document.metadata["chunk_type"] as? String ?: inferChunkType(chunkId)
+                ResumeSearchResult(
+                    chunkId = chunkId,
+                    chunkType = chunkType,
+                    content = content
+                )
+            }
     }
 
     override suspend fun findChunkById(id: String): String? = withContext(Dispatchers.IO) {
@@ -75,6 +89,21 @@ class MongoVectorAdapter(
                 logger.warn("Resume chunk not found for chunk_id={}. Re-index might be required.", id)
                 null
             }
+    }
+
+    override suspend fun findChunksByIds(ids: List<String>): Map<String, String> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyMap()
+
+        val query = Query(Criteria.where("metadata.chunk_id").`in`(ids))
+        val documents = reactiveMongoTemplate.find(query, ResumeChunkDocument::class.java, collectionName)
+            .collectList()
+            .awaitSingleOrNull()
+            .orEmpty()
+
+        documents.mapNotNull { doc ->
+            val chunkId = doc.metadata["chunk_id"] as? String ?: return@mapNotNull null
+            chunkId to doc.content
+        }.toMap()
     }
 
     private fun buildMetadata(chunk: ResumeChunk): Map<String, Any> {
@@ -95,4 +124,11 @@ class MongoVectorAdapter(
 
     private val collectionName: String
         get() = vectorStoreProperties.collectionName.ifBlank { COLLECTION_NAME }
+
+    private fun inferChunkType(chunkId: String): String = when {
+        chunkId.startsWith("project_") -> "project"
+        chunkId.startsWith("experience_") && chunkId != "experience_total_summary" -> "experience"
+        chunkId == "experience_total_summary" -> "summary"
+        else -> chunkId
+    }
 }

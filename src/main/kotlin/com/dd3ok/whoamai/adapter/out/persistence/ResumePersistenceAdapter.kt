@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
+import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.service.ResumeChunkingService
 import com.dd3ok.whoamai.domain.Resume
 import org.slf4j.LoggerFactory
@@ -35,11 +36,17 @@ class ResumePersistenceAdapter(
         return vectorDBPort.findChunkById(id)
     }
 
+    override suspend fun findContentsByIds(ids: List<String>): Map<String, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return vectorDBPort.findChunksByIds(ids)
+    }
+
     override suspend fun searchSimilarSections(
         query: String,
         topK: Int,
-        filter: Filter.Expression?
-    ): List<String> {
-        return vectorDBPort.searchSimilarResumeSections(query, topK, filter)
+        filter: Filter.Expression?,
+        similarityThreshold: Double?
+    ): List<ResumeSearchResult> {
+        return vectorDBPort.searchSimilarResumeSections(query, topK, filter, similarityThreshold)
     }
 }

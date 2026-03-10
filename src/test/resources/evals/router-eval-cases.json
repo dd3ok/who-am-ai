@@ -1,0 +1,21 @@
+[
+  {"question":"지마켓 경력 알려줘","expectedType":"RESUME_RAG","expectedCompany":"지마켓"},
+  {"question":"G마켓에서 어떤 일을 했어?","expectedType":"RESUME_RAG","expectedCompany":"지마켓"},
+  {"question":"Spring Boot 기반 프로젝트 소개해줘","expectedType":"RESUME_RAG","expectedSkill":"Spring Boot"},
+  {"question":"학력 알려줘","expectedType":"RESUME_RAG"},
+  {"question":"자격증 뭐 있어?","expectedType":"RESUME_RAG"},
+  {"question":"관심사가 뭐야?","expectedType":"RESUME_RAG"},
+  {"question":"취미가 뭐야?","expectedType":"RESUME_RAG"},
+  {"question":"총 경력 몇 년이야?","expectedType":"RESUME_RAG"},
+  {"question":"유인재의 협업 방식과 커뮤니케이션 강점을 알려줘","expectedType":"RESUME_RAG"},
+  {"question":"유인재의 트러블슈팅 경험 중 가장 임팩트 있었던 사례는?","expectedType":"RESUME_RAG"},
+  {"question":"백엔드 아키텍처 관련 강점이 뭐야?","expectedType":"NON_RAG"},
+  {"question":"너는 뭐로 만들어졌어?","expectedType":"NON_RAG"},
+  {"question":"너의 스택이 뭐야?","expectedType":"NON_RAG"},
+  {"question":"어제 어떤 사람 이력서를 봤는데 별로였어","expectedType":"NON_RAG"},
+  {"question":"이력서 어떻게 써?","expectedType":"NON_RAG"},
+  {"question":"보안 어떻게 공부해?","expectedType":"NON_RAG"},
+  {"question":"유인재의 보안 경험 알려줘","expectedType":"RESUME_RAG"},
+  {"question":"오늘 날씨 알려줘","expectedType":"NON_RAG"},
+  {"question":"주말 여행지 추천해줘","expectedType":"NON_RAG"}
+]

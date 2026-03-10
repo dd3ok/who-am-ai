@@ -7,10 +7,12 @@ interface ResumePersistencePort {
     suspend fun index(resume: Resume): Int
 
     suspend fun findContentById(id: String): String?
+    suspend fun findContentsByIds(ids: List<String>): Map<String, String>
 
     suspend fun searchSimilarSections(
         query: String,
         topK: Int,
-        filter: Filter.Expression? = null
-    ): List<String>
+        filter: Filter.Expression? = null,
+        similarityThreshold: Double? = null
+    ): List<ResumeSearchResult>
 }

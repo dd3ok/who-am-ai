@@ -8,6 +8,7 @@ import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
@@ -20,15 +21,15 @@ class ChatService(
     private val chatHistoryRepository: ChatHistoryRepository,
     private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
-    private val promptTemplateService: PromptProvider
+    private val promptTemplateService: PromptProvider,
+    private val meterRegistry: MeterRegistry
 ) : ChatUseCase {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private companion object {
         const val API_WINDOW_TOKENS = 2048
-        const val SUMMARY_TRIGGER_TOKENS = 4096
-        const val SUMMARY_SOURCE_MESSAGES = 5
+        const val PERSISTENCE_WINDOW_TOKENS = 8192
     }
 
     override suspend fun streamChatResponse(message: StreamMessage): Flow<String> {
@@ -40,23 +41,42 @@ class ChatService(
 
         // 1. ContextRetriever를 먼저 호출하여 규칙 기반 검색을 시도
         var relevantContexts = contextRetriever.retrieveByRule(userPrompt)
+        var resumeQuestionDetected = relevantContexts.isNotEmpty()
+        var retrievalPath = if (relevantContexts.isNotEmpty()) "rule" else "unknown"
 
         // 2. 규칙 기반으로 컨텍스트를 찾지 못했다면, 그 때 LLM 라우터와 벡터 검색을 사용
         if (relevantContexts.isEmpty()) {
             val routeDecision = llmRouter.route(userPrompt)
             logger.info("No rule match. LLM Router hint: $routeDecision")
             if (routeDecision.queryType == QueryType.RESUME_RAG) {
+                resumeQuestionDetected = true
                 relevantContexts = contextRetriever.retrieveByVector(userPrompt, routeDecision)
+                retrievalPath = "vector"
+            } else {
+                retrievalPath = "non_rag"
             }
+        }
+        if (relevantContexts.isEmpty() && resumeQuestionDetected) {
+            retrievalPath = "rag_empty"
         }
 
         // 3. 최종적으로 컨텍스트 존재 여부에 따라 프롬프트 결정
-        val finalHistory = if (relevantContexts.isNotEmpty()) {
+        val useRagPrompt = relevantContexts.isNotEmpty()
+        val finalHistory = if (useRagPrompt) {
             logger.info("Context found. Proceeding with RAG prompt.")
             createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
             logger.info("No context found. Proceeding with conversational prompt.")
             createConversationalPrompt(pastHistory, userPrompt)
+        }
+        meterRegistry.counter(
+            "whoamai.chat.request.total",
+            "mode", if (useRagPrompt) "rag" else "chat",
+            "retrieval_path", retrievalPath
+        ).increment()
+        meterRegistry.summary("whoamai.rag.context.size").record(relevantContexts.size.toDouble())
+        if (resumeQuestionDetected && relevantContexts.isEmpty()) {
+            meterRegistry.counter("whoamai.rag.empty_context.total").increment()
         }
 
         // 4. LLM 호출 및 결과 스트리밍
@@ -76,10 +96,12 @@ class ChatService(
 
     private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
         val currentHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
-        currentHistory.addMessage(ChatMessage(role = "user", text = userPrompt))
-        currentHistory.addMessage(ChatMessage(role = "model", text = modelResponse))
-        val finalHistoryToSave = summarizeHistoryIfNeeded(currentHistory)
-        chatHistoryRepository.save(finalHistoryToSave)
+        val messagesToPersist = currentHistory.history +
+            listOf(
+                ChatMessage(role = "user", text = userPrompt),
+                ChatMessage(role = "model", text = modelResponse)
+            )
+        chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
         logger.info("[SUCCESS] History for user {} saved.", userId)
     }
 
@@ -111,25 +133,19 @@ class ChatService(
         return recentMessages
     }
 
-    private suspend fun summarizeHistoryIfNeeded(originalHistory: ChatHistory): ChatHistory {
-        val totalTokens = originalHistory.history.sumOf { estimateTokens(it.text) }
-        if (totalTokens < SUMMARY_TRIGGER_TOKENS || originalHistory.history.size < SUMMARY_SOURCE_MESSAGES + 2) {
-            return originalHistory
+    private fun trimHistoryForPersistence(userId: String, messages: List<ChatMessage>): ChatHistory {
+        var currentTokens = 0
+        val recentMessages = mutableListOf<ChatMessage>()
+        for (msg in messages.reversed()) {
+            val estimatedTokens = estimateTokens(msg.text)
+            if (currentTokens + estimatedTokens > PERSISTENCE_WINDOW_TOKENS && recentMessages.isNotEmpty()) {
+                break
+            }
+            recentMessages.add(msg)
+            currentTokens += estimatedTokens
         }
-
-        logger.info("History for user {} exceeds token threshold. Starting summarization.", originalHistory.userId)
-        val messagesToSummarize = originalHistory.history.take(SUMMARY_SOURCE_MESSAGES)
-        val recentMessages = originalHistory.history.drop(SUMMARY_SOURCE_MESSAGES)
-        val summarizationPrompt = """다음 대화의 핵심 내용을 한두 문단으로 간결하게 요약해주세요. --- ${messagesToSummarize.joinToString("\n") { "[${it.role}]: ${it.text}" }} --- 요약:""".trimIndent()
-        val summaryText = geminiPort.generateContent(summarizationPrompt, "summarization")
-
-        if (summaryText.isBlank()) {
-            logger.warn("Summarization failed or returned empty. Skipping history modification.")
-            return originalHistory
-        }
-        val summaryMessage = ChatMessage(role = "model", text = "이전 대화 요약: $summaryText")
-        val newMessages = mutableListOf(summaryMessage).apply { addAll(recentMessages) }
-        return ChatHistory(originalHistory.userId, newMessages)
+        recentMessages.reverse()
+        return ChatHistory(userId = userId, messages = recentMessages)
     }
 
     private fun estimateTokens(text: String): Int = (text.length * 1.5).toInt()

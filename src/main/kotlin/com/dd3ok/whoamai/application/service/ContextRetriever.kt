@@ -1,11 +1,13 @@
 package com.dd3ok.whoamai.application.service
-
+	
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
+import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
 import org.springframework.stereotype.Component
 
@@ -16,7 +18,8 @@ import org.springframework.stereotype.Component
 @Component
 class ContextRetriever(
     private val resumePersistencePort: ResumePersistencePort,
-    private val resumeProviderPort: ResumeProviderPort
+    private val resumeProviderPort: ResumeProviderPort,
+    @Value("\${rag.search.metadata-filter-enabled:true}") private val metadataFilterEnabled: Boolean
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val filterExpressionBuilder = FilterExpressionBuilder()
@@ -47,19 +50,23 @@ class ContextRetriever(
      */
     suspend fun retrieveByRule(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
-        val normalizedQuery = userPrompt.replace(Regex("\\s+"), "").lowercase()
+        val normalizedQuery = normalizeResumeQuery(userPrompt)
         if (isSelfIdentityPrompt(normalizedQuery)) {
             logger.info("Self-identity prompt detected. Skipping rule-based RAG.")
             return emptyList()
         }
         val nameFragments = NameFragmentExtractor.extract(resume.name)
+        if (!isLikelyResumeQuestion(userPrompt, normalizedQuery, resume, nameFragments)) {
+            logger.info("Prompt is not a targeted resume question. Skipping rule-based RAG.")
+            return emptyList()
+        }
 
         // 1. Specific project title check
-        val matchedProject = resume.projects.find { userPrompt.contains(it.title) }
+        val matchedProject = resume.projects.find { normalizedQuery.contains(normalizeResumeQuery(it.title)) }
         if (matchedProject != null) {
             logger.info("Context retrieved by: Specific Project Rule ('${matchedProject.title}').")
             val projectId = ChunkIdGenerator.forProject(matchedProject.title)
-            return resumePersistencePort.findContentById(projectId)?.let { listOf(it) } ?: emptyList()
+            return fetchPlainChunks(listOf(projectId))
         }
 
         // 2. General rule-based check
@@ -69,13 +76,13 @@ class ContextRetriever(
             if (result != null) {
                 logger.info("Context retrieved by: General Rule ('$result').")
                 return when (result) {
-                    "projects" -> resume.projects.mapNotNull {
-                        resumePersistencePort.findContentById(ChunkIdGenerator.forProject(it.title))
-                    }
-                    "experiences" -> resume.experiences.mapNotNull {
-                        resumePersistencePort.findContentById(ChunkIdGenerator.forExperience(it.company))
-                    }
-                    else -> resumePersistencePort.findContentById(result)?.let { listOf(it) } ?: emptyList()
+                    "projects" -> fetchPlainChunks(
+                        resume.projects.map { ChunkIdGenerator.forProject(it.title) }
+                    )
+                    "experiences" -> fetchPlainChunks(
+                        resume.experiences.map { ChunkIdGenerator.forExperience(it.company) }
+                    )
+                    else -> fetchPlainChunks(listOf(result))
                 }
             }
         }
@@ -88,12 +95,17 @@ class ContextRetriever(
      */
     suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> {
         logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
+        val precise = retrievePreciseByRouteHints(routeDecision)
+        val retrievalProfile = resolveRetrievalProfile(userPrompt, routeDecision)
+
         val filterOps = mutableListOf<FilterExpressionBuilder.Op>()
-        routeDecision.company?.let {
-            filterOps.add(filterExpressionBuilder.eq("company", it))
-        }
-        routeDecision.skills?.takeIf { it.isNotEmpty() }?.let { skills ->
-            filterOps.add(filterExpressionBuilder.`in`("skills", skills))
+        if (shouldApplyMetadataFilter(routeDecision)) {
+            routeDecision.company?.let {
+                filterOps.add(filterExpressionBuilder.eq("company", it))
+            }
+            routeDecision.skills?.takeIf { it.isNotEmpty() }?.let { skills ->
+                filterOps.add(filterExpressionBuilder.`in`("skills", skills))
+            }
         }
 
         val finalFilter = if (filterOps.isEmpty()) {
@@ -105,26 +117,206 @@ class ContextRetriever(
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
         val finalQuery = "$userPrompt $searchKeywords".trim()
 
-        val retrieved = resumePersistencePort.searchSimilarSections(finalQuery, topK = 10, filter = finalFilter)
-        return rerankByHeuristic(finalQuery, retrieved, 3)
+        val retrieved = resumePersistencePort.searchSimilarSections(
+            query = finalQuery,
+            topK = retrievalProfile.topK,
+            filter = finalFilter,
+            similarityThreshold = retrievalProfile.similarityThreshold
+        )
+        val blended = (precise + retrieved).distinctBy { it.chunkId }
+        return rerankByHeuristic(finalQuery, blended, routeDecision, 4)
+            .map { it.content }
     }
 
-    /** 간단한 질의 토큰 교집합 기반 리랭크로 가장 관련도 높은 컨텍스트를 우선 선택한다. */
-    private fun rerankByHeuristic(query: String, contents: List<String>, limit: Int): List<String> {
+    /** 질의 토큰 교집합 + chunk type 가중치 기반 리랭크로 가장 관련도 높은 컨텍스트를 우선 선택한다. */
+    private fun rerankByHeuristic(
+        query: String,
+        contents: List<ResumeSearchResult>,
+        routeDecision: RouteDecision,
+        limit: Int
+    ): List<ResumeSearchResult> {
         if (contents.isEmpty()) return contents
-        val tokens = query.lowercase().split(" ", "\n", "\t").filter { it.isNotBlank() }.toSet()
+        val tokens = query.lowercase()
+            .replace(Regex("[^\\p{L}\\p{Nd}]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length >= 2 && !RERANK_STOPWORDS.contains(it) }
+            .toSet()
         if (tokens.isEmpty()) return contents.take(limit)
 
+        val preferredTypes = preferredChunkTypes(query, routeDecision)
+
         return contents
-            .map { content ->
-                val lowered = content.lowercase()
+            .map { result ->
+                val lowered = result.content.lowercase()
                 val matchCount = tokens.count { lowered.contains(it) }
-                content to matchCount
+                val typeWeight = preferredTypes[result.chunkType] ?: 0
+                val companyWeight = if (
+                    routeDecision.company != null &&
+                    lowered.contains(routeDecision.company.lowercase())
+                ) 2 else 0
+                result to (matchCount * 10 + typeWeight + companyWeight)
             }
-            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenByDescending { it.first.length })
+            .sortedWith(
+                compareByDescending<Pair<ResumeSearchResult, Int>> { it.second }
+                    .thenByDescending { it.first.content.length }
+            )
             .map { it.first }
             .take(limit)
     }
+
+    private suspend fun retrievePreciseByRouteHints(routeDecision: RouteDecision): List<ResumeSearchResult> {
+        val resume = resumeProviderPort.getResume()
+        val preciseChunkIds = mutableListOf<String>()
+
+        routeDecision.company?.let { company ->
+            val matchedExperience = resume.experiences.firstOrNull {
+                normalizeResumeQuery(it.company) == normalizeResumeQuery(company) ||
+                    it.aliases.any { alias -> normalizeResumeQuery(alias) == normalizeResumeQuery(company) }
+            }
+            matchedExperience?.let {
+                preciseChunkIds += ChunkIdGenerator.forExperience(it.company)
+                resume.projects
+                    .filter { project -> normalizeResumeQuery(project.company) == normalizeResumeQuery(it.company) }
+                    .forEach { project -> preciseChunkIds += ChunkIdGenerator.forProject(project.title) }
+            }
+        }
+
+        val normalizedSkillHints = routeDecision.skills.orEmpty().map(::normalizeResumeQuery).toSet()
+        if (normalizedSkillHints.isNotEmpty()) {
+            preciseChunkIds += ChunkIdGenerator.forSkills()
+            resume.projects
+                .filter { project ->
+                    project.skills.any { skill -> normalizedSkillHints.contains(normalizeResumeQuery(skill)) } ||
+                        project.tags.any { tag -> normalizedSkillHints.contains(normalizeResumeQuery(tag)) }
+                }
+                .forEach { project -> preciseChunkIds += ChunkIdGenerator.forProject(project.title) }
+        }
+
+        return preciseChunkIds
+            .distinct()
+            .let { fetchStructuredChunks(it) }
+    }
+
+    private suspend fun fetchStructuredChunks(chunkIds: List<String>): List<ResumeSearchResult> {
+        if (chunkIds.isEmpty()) return emptyList()
+        val contents = resumePersistencePort.findContentsByIds(chunkIds)
+        return chunkIds.mapNotNull { chunkId ->
+            contents[chunkId]?.let { content ->
+                ResumeSearchResult(
+                    chunkId = chunkId,
+                    chunkType = inferChunkType(chunkId),
+                    content = content
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchPlainChunks(chunkIds: List<String>): List<String> {
+        if (chunkIds.isEmpty()) return emptyList()
+        val contents = resumePersistencePort.findContentsByIds(chunkIds)
+        return chunkIds.mapNotNull(contents::get)
+    }
+
+    private fun preferredChunkTypes(query: String, routeDecision: RouteDecision): Map<String, Int> {
+        val normalizedQuery = normalizeResumeQuery(query)
+        val weights = mutableMapOf<String, Int>()
+
+        fun prefer(type: String, weight: Int) {
+            weights[type] = maxOf(weights[type] ?: 0, weight)
+        }
+
+        if (routeDecision.company != null) {
+            prefer("experience", 12)
+            prefer("project", 8)
+        }
+        if (!routeDecision.skills.isNullOrEmpty()) {
+            prefer("skills", 12)
+            prefer("project", 10)
+        }
+        if (PROJECT_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("project", 14)
+        }
+        if (EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("experience", 14)
+        }
+        if (SKILL_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("skills", 14)
+        }
+        if (EDU_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("education", 16)
+        }
+        if (CERTIFICATE_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("certificate", 16)
+        }
+        if (INTEREST_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("interest", 16)
+        }
+        if (HOBBY_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("hobby", 16)
+        }
+        if (PERSONALITY_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("personality", 16)
+        }
+        if (TOTAL_EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("summary", 16)
+        }
+        if (PROJECT_ORIENTED_DETAIL_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("project", 12)
+        }
+        if (EXPERIENCE_ORIENTED_DETAIL_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("experience", 10)
+        }
+
+        return weights
+    }
+
+    private fun resolveRetrievalProfile(query: String, routeDecision: RouteDecision): RetrievalProfile {
+        val normalizedQuery = normalizeResumeQuery(query)
+        val hasExplicitHint = routeDecision.company != null || !routeDecision.skills.isNullOrEmpty()
+        if (hasExplicitHint) {
+            return RetrievalProfile(topK = 4, similarityThreshold = 0.72)
+        }
+        if (isProfileFocusedQuery(normalizedQuery)) {
+            return RetrievalProfile(topK = 3, similarityThreshold = 0.70)
+        }
+        if (isAbstractCapabilityQuery(normalizedQuery)) {
+            return RetrievalProfile(topK = 8, similarityThreshold = 0.58)
+        }
+        return RetrievalProfile(topK = 6, similarityThreshold = 0.65)
+    }
+
+    private fun isProfileFocusedQuery(normalizedQuery: String): Boolean {
+        return TOTAL_EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            EDU_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            CERTIFICATE_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            INTEREST_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            HOBBY_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            PERSONALITY_KEYWORDS.any { normalizedQuery.contains(it) }
+    }
+
+    private fun isAbstractCapabilityQuery(normalizedQuery: String): Boolean {
+        return PROJECT_ORIENTED_DETAIL_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            EXPERIENCE_ORIENTED_DETAIL_KEYWORDS.any { normalizedQuery.contains(it) }
+    }
+
+    private fun shouldApplyMetadataFilter(routeDecision: RouteDecision): Boolean {
+        if (!metadataFilterEnabled) {
+            return false
+        }
+        return routeDecision.company != null || !routeDecision.skills.isNullOrEmpty()
+    }
+
+    private fun inferChunkType(chunkId: String): String = when {
+        chunkId.startsWith("project_") -> "project"
+        chunkId.startsWith("experience_") && chunkId != "experience_total_summary" -> "experience"
+        chunkId == "experience_total_summary" -> "summary"
+        else -> chunkId
+    }
+
+    private data class RetrievalProfile(
+        val topK: Int,
+        val similarityThreshold: Double
+    )
 }
 
 private data class RuleContext(
@@ -145,8 +337,34 @@ private val SKILL_KEYWORDS = normalizedKeywords("기술", "스킬", "스택")
 private val EDU_KEYWORDS = normalizedKeywords("학력", "학교", "대학")
 private val PERSONALITY_KEYWORDS = normalizedKeywords("mbti", "성격")
 private val HOBBY_KEYWORDS = normalizedKeywords("취미", "여가시간")
+private val RERANK_STOPWORDS = normalizedKeywords("알려줘", "말해줘", "설명", "설명해줘", "정리", "대한", "관련", "좀", "해주세요")
+private val PROJECT_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
+    "트러블슈팅", "성능", "장애", "개선", "최적화", "아키텍처", "msa", "ddd", "자동화", "배치", "테스트", "품질", "보안", "인증", "인가"
+)
+private val EXPERIENCE_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
+    "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션"
+)
 
 private fun isSelfIdentityPrompt(normalizedQuery: String): Boolean {
-    val identityTokens = listOf("너는", "넌", "누구야", "누구니", "너뭐", "너무엇", "뭐로만들", "만들어졌")
-    return identityTokens.any { normalizedQuery.contains(it) }
+    val explicitPhrases = listOf(
+        "너는뭐로만들어졌",
+        "넌뭐로만들어졌",
+        "너의스택",
+        "넌무슨스택",
+        "너는무슨모델",
+        "너는누가만들었",
+        "누가너를만들었",
+        "어떤프레임워크로만들"
+    )
+    if (explicitPhrases.any { normalizedQuery.contains(it) }) {
+        return true
+    }
+
+    val selfReferenceTokens = listOf("너는", "넌", "니가", "너의", "누구야", "누구니")
+    val modelIdentityTokens = listOf(
+        "만들어졌", "만들었", "스택", "stack", "gpt", "제미나이", "gemini", "구글", "google", "openai", "llm", "모델", "프레임워크"
+    )
+    val hasSelfReference = selfReferenceTokens.any { normalizedQuery.contains(it) }
+    val hasModelIdentityIntent = modelIdentityTokens.any { normalizedQuery.contains(it) }
+    return hasSelfReference && hasModelIdentityIntent
 }
