@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component
 class ContextRetriever(
     private val resumePersistencePort: ResumePersistencePort,
     private val resumeProviderPort: ResumeProviderPort,
+    private val ownDomainProfileProvider: OwnDomainProfileProvider,
     @Value("\${rag.search.metadata-filter-enabled:true}") private val metadataFilterEnabled: Boolean
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -26,12 +27,6 @@ class ContextRetriever(
 
     private val rules: List<(RuleContext) -> String?> by lazy {
         listOf(
-            { ctx ->
-                val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
-                if (matchesIntro || NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)) {
-                    ChunkIdGenerator.forSummary()
-                } else null
-            },
             { ctx -> if (TOTAL_EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
             { ctx -> if (PROJECT_KEYWORDS.any { ctx.query.contains(it) }) "projects" else null },
             { ctx -> if (EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) "experiences" else null },
@@ -40,7 +35,14 @@ class ContextRetriever(
             { ctx -> if (SKILL_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forSkills() else null },
             { ctx -> if (EDU_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forEducation() else null },
             { ctx -> if (PERSONALITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forMbti() else null },
-            { ctx -> if (HOBBY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forHobbies() else null }
+            { ctx -> if (HOBBY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forHobbies() else null },
+            { ctx ->
+                val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
+                val matchesName = NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)
+                if (matchesIntro || (matchesName && !isSpecificResumeSlotQuery(ctx.query))) {
+                    ChunkIdGenerator.forSummary()
+                } else null
+            }
         )
     }
 
@@ -51,13 +53,13 @@ class ContextRetriever(
     suspend fun retrieveByRule(userPrompt: String): List<String> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = normalizeResumeQuery(userPrompt)
-        if (isSelfIdentityPrompt(normalizedQuery)) {
-            logger.info("Self-identity prompt detected. Skipping rule-based RAG.")
-            return emptyList()
+        if (isOwnServiceQuestion(normalizedQuery)) {
+            logger.info("Context retrieved by: Own Service Rule.")
+            return listOf(ownDomainProfileProvider.serviceProfile())
         }
         val nameFragments = NameFragmentExtractor.extract(resume.name)
-        if (!isLikelyResumeQuestion(userPrompt, normalizedQuery, resume, nameFragments)) {
-            logger.info("Prompt is not a targeted resume question. Skipping rule-based RAG.")
+        if (!isLikelyOwnDomainQuestion(userPrompt, normalizedQuery, resume, nameFragments)) {
+            logger.info("Prompt is not an owned-domain question. Skipping rule-based RAG.")
             return emptyList()
         }
 
@@ -69,11 +71,17 @@ class ContextRetriever(
             return fetchPlainChunks(listOf(projectId))
         }
 
+        val shouldDeferBroadRule = shouldDeferBroadRuleToVector(normalizedQuery, resume)
+
         // 2. General rule-based check
         val ctx = RuleContext(normalizedQuery, nameFragments)
         for (rule in rules) {
             val result = rule(ctx)
             if (result != null) {
+                if (shouldDeferBroadRule && result in BROAD_RULE_RESULTS) {
+                    logger.info("Broad rule '{}' deferred to vector path because explicit entity hints exist.", result)
+                    continue
+                }
                 logger.info("Context retrieved by: General Rule ('$result').")
                 return when (result) {
                     "projects" -> fetchPlainChunks(
@@ -168,6 +176,15 @@ class ContextRetriever(
         val resume = resumeProviderPort.getResume()
         val preciseChunkIds = mutableListOf<String>()
 
+        routeDecision.project?.let { projectTitle ->
+            resume.projects.firstOrNull {
+                normalizeResumeQuery(it.title) == normalizeResumeQuery(projectTitle)
+            }?.let { matchedProject ->
+                preciseChunkIds += ChunkIdGenerator.forProject(matchedProject.title)
+                preciseChunkIds += ChunkIdGenerator.forExperience(matchedProject.company)
+            }
+        }
+
         routeDecision.company?.let { company ->
             val matchedExperience = resume.experiences.firstOrNull {
                 normalizeResumeQuery(it.company) == normalizeResumeQuery(company) ||
@@ -229,6 +246,10 @@ class ContextRetriever(
             prefer("experience", 12)
             prefer("project", 8)
         }
+        if (routeDecision.project != null) {
+            prefer("project", 16)
+            prefer("experience", 6)
+        }
         if (!routeDecision.skills.isNullOrEmpty()) {
             prefer("skills", 12)
             prefer("project", 10)
@@ -272,7 +293,7 @@ class ContextRetriever(
 
     private fun resolveRetrievalProfile(query: String, routeDecision: RouteDecision): RetrievalProfile {
         val normalizedQuery = normalizeResumeQuery(query)
-        val hasExplicitHint = routeDecision.company != null || !routeDecision.skills.isNullOrEmpty()
+        val hasExplicitHint = routeDecision.company != null || routeDecision.project != null || !routeDecision.skills.isNullOrEmpty()
         if (hasExplicitHint) {
             return RetrievalProfile(topK = 4, similarityThreshold = 0.72)
         }
@@ -304,6 +325,29 @@ class ContextRetriever(
             return false
         }
         return routeDecision.company != null || !routeDecision.skills.isNullOrEmpty()
+    }
+
+    private fun shouldDeferBroadRuleToVector(
+        normalizedQuery: String,
+        resume: com.dd3ok.whoamai.domain.Resume
+    ): Boolean {
+        val hasBroadRuleKeyword = PROJECT_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            SKILL_KEYWORDS.any { normalizedQuery.contains(it) }
+
+        if (!hasBroadRuleKeyword) {
+            return false
+        }
+
+        val hasCompanyHint = resume.experiences.any { exp ->
+            normalizedQuery.contains(normalizeResumeQuery(exp.company)) ||
+                exp.aliases.any { alias -> normalizedQuery.contains(normalizeResumeQuery(alias)) }
+        }
+        val hasSkillHint = resume.skills.any { normalizedQuery.contains(normalizeResumeQuery(it)) }
+        val hasProjectHint = resume.projects.any { project ->
+            normalizedQuery.contains(normalizeResumeQuery(project.title))
+        }
+        return hasCompanyHint || hasSkillHint || hasProjectHint
     }
 
     private fun inferChunkType(chunkId: String): String = when {
@@ -344,27 +388,17 @@ private val PROJECT_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
 private val EXPERIENCE_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
     "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션"
 )
+private val BROAD_RULE_RESULTS = setOf("projects", "experiences", "skills")
 
-private fun isSelfIdentityPrompt(normalizedQuery: String): Boolean {
-    val explicitPhrases = listOf(
-        "너는뭐로만들어졌",
-        "넌뭐로만들어졌",
-        "너의스택",
-        "넌무슨스택",
-        "너는무슨모델",
-        "너는누가만들었",
-        "누가너를만들었",
-        "어떤프레임워크로만들"
-    )
-    if (explicitPhrases.any { normalizedQuery.contains(it) }) {
-        return true
-    }
-
-    val selfReferenceTokens = listOf("너는", "넌", "니가", "너의", "누구야", "누구니")
-    val modelIdentityTokens = listOf(
-        "만들어졌", "만들었", "스택", "stack", "gpt", "제미나이", "gemini", "구글", "google", "openai", "llm", "모델", "프레임워크"
-    )
-    val hasSelfReference = selfReferenceTokens.any { normalizedQuery.contains(it) }
-    val hasModelIdentityIntent = modelIdentityTokens.any { normalizedQuery.contains(it) }
-    return hasSelfReference && hasModelIdentityIntent
+private fun isSpecificResumeSlotQuery(normalizedQuery: String): Boolean {
+    val slotKeywords = TOTAL_EXPERIENCE_KEYWORDS +
+        PROJECT_KEYWORDS +
+        EXPERIENCE_KEYWORDS +
+        CERTIFICATE_KEYWORDS +
+        INTEREST_KEYWORDS +
+        SKILL_KEYWORDS +
+        EDU_KEYWORDS +
+        PERSONALITY_KEYWORDS +
+        HOBBY_KEYWORDS
+    return slotKeywords.any { normalizedQuery.contains(it) }
 }

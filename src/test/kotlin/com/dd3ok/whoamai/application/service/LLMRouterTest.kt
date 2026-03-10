@@ -2,6 +2,7 @@ package com.dd3ok.whoamai.application.service
 
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.service.dto.QueryType
+import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.Education
 import com.dd3ok.whoamai.domain.Experience
 import com.dd3ok.whoamai.domain.Period
@@ -42,7 +43,7 @@ class LLMRouterTest {
     }
 
     @Test
-    fun `identity questions are hard-blocked to NON_RAG`() = runTest {
+    fun `self referential implementation questions are routed to RESUME_RAG`() = runTest {
         val router = LLMRouter(
             resumeProviderPort = fakeResumeProvider,
             meterRegistry = SimpleMeterRegistry()
@@ -50,7 +51,7 @@ class LLMRouterTest {
 
         val decision = router.route("너는 뭐로 만들어졌어?")
 
-        assertEquals(QueryType.NON_RAG, decision.queryType)
+        assertEquals(QueryType.RESUME_RAG, decision.queryType)
     }
 
     @Test
@@ -114,6 +115,30 @@ class LLMRouterTest {
     }
 
     @Test
+    fun `external service question should stay NON_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("당근은 어떤 기술을 쓰나요")
+
+        assertEquals(QueryType.NON_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `pure identity chat should stay NON_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("안녕 넌 누구야")
+
+        assertEquals(QueryType.NON_RAG, decision.queryType)
+    }
+
+    @Test
     fun `targeted capability question should stay RESUME_RAG`() = runTest {
         val router = LLMRouter(
             resumeProviderPort = fakeResumeProvider,
@@ -123,5 +148,36 @@ class LLMRouterTest {
         val decision = router.route("유인재의 보안 경험 알려줘")
 
         assertEquals(QueryType.RESUME_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `name mentioned skill question should route to RESUME_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("인재님은 어떤 기술들을 사용하나요")
+
+        assertEquals(QueryType.RESUME_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `follow up question should inherit recent company hint`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route(
+            "거기서 사용한 기술은?",
+            history = listOf(
+                ChatMessage(role = "user", text = "지마켓 경력 알려줘"),
+                ChatMessage(role = "model", text = "지마켓에서 백엔드 개발자로 근무했습니다.")
+            )
+        )
+
+        assertEquals(QueryType.RESUME_RAG, decision.queryType)
+        assertEquals("지마켓", decision.company)
     }
 }

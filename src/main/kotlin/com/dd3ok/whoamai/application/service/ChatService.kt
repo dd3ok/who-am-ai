@@ -46,7 +46,7 @@ class ChatService(
 
         // 2. 규칙 기반으로 컨텍스트를 찾지 못했다면, 그 때 LLM 라우터와 벡터 검색을 사용
         if (relevantContexts.isEmpty()) {
-            val routeDecision = llmRouter.route(userPrompt)
+            val routeDecision = llmRouter.route(userPrompt, pastHistory)
             logger.info("No rule match. LLM Router hint: $routeDecision")
             if (routeDecision.queryType == QueryType.RESUME_RAG) {
                 resumeQuestionDetected = true

@@ -7,6 +7,9 @@ import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.domain.Resume
+import com.dd3ok.whoamai.domain.Experience
+import com.dd3ok.whoamai.domain.Project
+import com.dd3ok.whoamai.domain.Period
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,16 +22,39 @@ class ContextRetrieverTest {
     private val resume = Resume(
         name = "유인재",
         summary = "요약",
-        interests = listOf("AI 서비스", "MSA")
+        interests = listOf("AI 서비스", "MSA"),
+        skills = listOf("Spring Boot"),
+        experiences = listOf(
+            Experience(
+                company = "지마켓",
+                aliases = listOf("G마켓"),
+                period = Period("2021-10", "2025-01"),
+                position = "백엔드 개발자"
+            )
+        ),
+        projects = listOf(
+            Project(
+                title = "정산 플랫폼",
+                company = "지마켓",
+                period = Period("2024-01", "2024-12"),
+                skills = listOf("Spring Boot")
+            )
+        )
     )
 
     private val persistencePort = FakeResumePersistencePort()
+    private val ownDomainProfileProvider = OwnDomainProfileProvider()
     private val providerPort = object : ResumeProviderPort {
         override fun getResume(): Resume = resume
         override fun isInitialized(): Boolean = true
     }
 
-    private val contextRetriever = ContextRetriever(persistencePort, providerPort, metadataFilterEnabled = true)
+    private val contextRetriever = ContextRetriever(
+        persistencePort,
+        providerPort,
+        ownDomainProfileProvider,
+        metadataFilterEnabled = true
+    )
 
     @BeforeEach
     fun setup() {
@@ -69,10 +95,56 @@ class ContextRetrieverTest {
     }
 
     @Test
+    fun `name mentioned skill questions should return skills chunk before summary`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forSummary(), "SUMMARY")
+        persistencePort.stub(ChunkIdGenerator.forSkills(), "SKILLS")
+
+        val result = contextRetriever.retrieveByRule("인재님은 어떤 기술들을 사용하나요")
+
+        assertEquals(1, result.size)
+        assertTrue(result.first().contains("SKILLS"))
+    }
+
+    @Test
+    fun `own service implementation question should return own domain context`() = runTest {
+        val result = contextRetriever.retrieveByRule("who-am-ai는 어떤 기술로 만들었나요")
+
+        assertEquals(1, result.size)
+        assertTrue(result.first().contains("Spring AI"))
+        assertTrue(result.first().contains("MongoDB Atlas Vector Search"))
+    }
+
+    @Test
+    fun `self referential implementation question should return own domain context`() = runTest {
+        val result = contextRetriever.retrieveByRule("너는 뭐로 만들어졌어?")
+
+        assertEquals(1, result.size)
+        assertTrue(result.first().contains("Google Gemini"))
+    }
+
+    @Test
     fun `declarative chat with resume keyword must not trigger rule retrieval`() = runTest {
         persistencePort.stub(ChunkIdGenerator.forSummary(), "SUMMARY")
 
         val result = contextRetriever.retrieveByRule("어제 어떤 사람 이력서를 봤는데 별로였어")
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `company mentioned experience question should defer broad rule to vector`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forExperience("지마켓"), "GMARKET")
+
+        val result = contextRetriever.retrieveByRule("지마켓 경력 알려줘")
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `skill mentioned project question should defer broad rule to vector`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forProject("정산 플랫폼"), "PROJECT")
+
+        val result = contextRetriever.retrieveByRule("Spring Boot 프로젝트 소개해줘")
 
         assertTrue(result.isEmpty())
     }
