@@ -8,15 +8,15 @@
     },
     {
       "type": "filter",
-      "path": "chunk_type"
+      "path": "metadata.chunk_type"
     },
     {
       "type": "filter",
-      "path": "company"
+      "path": "metadata.company"
     },
     {
       "type": "filter",
-      "path": "skills"
+      "path": "metadata.skills"
     }
   ]
 }
