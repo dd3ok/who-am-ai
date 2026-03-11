@@ -21,7 +21,8 @@ spring:
           api-key: ${GEMINI_API_KEY}
           text:
             options:
-              model: text-embedding-004
+              model: gemini-embedding-001
+              dimensions: 768
               task-type: RETRIEVAL_DOCUMENT
         image:
           base-url: https://generativelanguage.googleapis.com
