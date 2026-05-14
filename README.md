@@ -6,8 +6,9 @@ Kotlin/Spring Boot 3 service that chunks a resume JSON, stores embeddings in Mon
 
 - Runtime: Kotlin 2.3.21, Spring Boot 3.5.14, WebFlux/WebSocket, JDK 21
 - AI: Spring AI 1.1.6 with Google GenAI
-- Chat models: `gemini-2.5-flash-lite`, then `gemini-2.5-flash-lite-preview-09-2025` fallback
+- Chat models: `gemini-3.1-flash-lite`, then `gemini-3-flash-preview`, then `gemini-2.5-flash-lite` fallback
 - Embedding model: `gemini-embedding-001` with 768 dimensions
+- AI fitting image model: `gemini-2.5-flash-image`
 - Storage: MongoDB Atlas Vector Search, `resume_chunks` collection, `vector_index` index
 - Build: checked-in Gradle wrapper
 
@@ -48,6 +49,18 @@ Admin key, required for `/api/admin/**`:
 ```bash
 export ADMIN_API_KEY="<admin-secret>"
 ```
+
+## Gemini Free Tier Notes
+
+The default chat model order favors free-tier friendly Gemini 3 models:
+
+- `gemini-3.1-flash-lite`: stable, cost-efficient Gemini 3.1 model with free input and output tokens.
+- `gemini-3-flash-preview`: stronger Gemini 3 fallback with free standard input and output tokens, but preview limits can be more restrictive.
+- `gemini-2.5-flash-lite`: conservative fallback if a Gemini 3 preview endpoint is unavailable or rate-limited.
+
+Google applies Gemini API rate limits per project, not per API key, and daily quotas reset at midnight Pacific time. Exact active RPM/TPM/RPD limits are not fixed in this repo because Google says they vary by model, project, and usage tier; check the live values in Google AI Studio: <https://aistudio.google.com/app/usage>.
+
+The image fitting model stays on `gemini-2.5-flash-image`. Current Gemini 3 image preview models such as `gemini-3.1-flash-image-preview` and `gemini-3-pro-image-preview` are not free-tier defaults, so they are intentionally not enabled here.
 
 Atlas setup:
 
