@@ -61,7 +61,7 @@ class ChatService(
         }
 
         // 3. 최종적으로 컨텍스트 존재 여부에 따라 프롬프트 결정
-        val useRagPrompt = relevantContexts.isNotEmpty()
+        val useRagPrompt = relevantContexts.isNotEmpty() || resumeQuestionDetected
         val finalHistory = if (useRagPrompt) {
             logger.info("Context found. Proceeding with RAG prompt.")
             createRagPrompt(pastHistory, userPrompt, relevantContexts)

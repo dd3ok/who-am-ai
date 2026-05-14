@@ -25,7 +25,7 @@ import org.springframework.ai.vectorstore.filter.Filter
 class ChatServiceTest {
 
     @Test
-    fun `resume intent with empty context falls back to conversational prompt`() = runTest {
+    fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
         val service = ChatService(
             geminiPort = geminiPort,
@@ -45,11 +45,12 @@ class ChatServiceTest {
         )
 
         service.streamChatResponse(
-            StreamMessage(uuid = "user-1", type = MessageType.USER, content = "백엔드 아키텍처 관련 강점이 뭐야?")
+            StreamMessage(uuid = "user-1", type = MessageType.USER, content = "유인재의 백엔드 아키텍처 관련 강점이 뭐야?")
         ).toList()
 
         val finalPrompt = geminiPort.lastHistory.last().text
-        assertTrue(finalPrompt.startsWith("CHAT::"), "Expected conversational prompt fallback, but was: $finalPrompt")
+        assertTrue(finalPrompt.startsWith("RAG::"), "Expected grounded RAG prompt fallback, but was: $finalPrompt")
+        assertTrue(finalPrompt.contains("관련 정보 없음"), "Expected empty context marker, but was: $finalPrompt")
     }
 
     @Test

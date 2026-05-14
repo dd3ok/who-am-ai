@@ -15,6 +15,8 @@ import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
 import org.springframework.stereotype.Component
+import kotlinx.coroutines.reactor.awaitSingle
+import java.time.Instant
 
 /**
  * 작업 목적: Spring AI MongoDB Atlas VectorStore를 사용해 이력서 Chunk를 색인·검색한다.
@@ -36,12 +38,12 @@ class MongoVectorAdapter(
             return@withContext 0
         }
 
-        reactiveMongoTemplate.remove(Query(), collectionName)
-            .awaitSingleOrNull()
+        val indexBatchId = Instant.now().toString()
 
         val documents = chunks.map { chunk ->
             val metadata = buildMetadata(chunk).toMutableMap().apply {
                 putIfAbsent("chunk_id", chunk.id)
+                put("index_batch_id", indexBatchId)
             }
 
             AiDocument(
@@ -51,6 +53,23 @@ class MongoVectorAdapter(
         }
 
         vectorStore.add(documents)
+        val indexedCount = reactiveMongoTemplate.count(
+            Query(Criteria.where("metadata.index_batch_id").`is`(indexBatchId)),
+            collectionName
+        ).awaitSingle()
+        if (indexedCount < documents.size) {
+            throw IllegalStateException(
+                "Indexed batch verification failed. expected=${documents.size}, actual=$indexedCount"
+            )
+        }
+        val staleBatchQuery = Query(
+            Criteria().orOperator(
+                Criteria.where("metadata.index_batch_id").exists(false),
+                Criteria.where("metadata.index_batch_id").ne(indexBatchId)
+            )
+        )
+        reactiveMongoTemplate.remove(staleBatchQuery, collectionName)
+            .awaitSingleOrNull()
         logger.info("Successfully indexed {} resume chunks via Spring AI VectorStore.", documents.size)
         documents.size
     }

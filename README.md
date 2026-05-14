@@ -1,73 +1,118 @@
-# Who Am AI — AI 이력서 RAG 챗봇
+# Who Am AI - AI resume RAG chatbot
 
-Kotlin/Spring Boot 3 기반으로 이력서 JSON을 청크→임베딩→MongoDB Atlas Vector Search에 올리고, WebSocket으로 질의에 답하는 개인화 챗봇입니다.
+Kotlin/Spring Boot 3 service that chunks a resume JSON, stores embeddings in MongoDB Atlas Vector Search, and answers resume questions over WebSocket.
 
-규칙 기반 검색, LLM 라우팅, RAG를 조합해 정확도가 높은 답을 반환합니다.
+## Stack
 
-## 주요 스택
-- 언어/런타임: Kotlin 1.9+, Spring Boot 3.5.10, WebFlux/WebSocket
-- AI 프레임워크: Spring AI 1.1.2 (stable)
-- LLM: Spring AI + Google Gemini 2.5 (일반: flash → flash-preview fallback, 라우팅: flash-lite → flash-lite-preview fallback), 임베딩 text-embedding-004
-- 스토리지: MongoDB Atlas Vector Search (`resume_chunks` 컬렉션)
-- 설정/빌드: Gradle, application.yml, atlas-index.json
+- Runtime: Kotlin 2.3.21, Spring Boot 3.5.14, WebFlux/WebSocket, JDK 21
+- AI: Spring AI 1.1.6 with Google GenAI
+- Chat models: `gemini-2.5-flash-lite`, then `gemini-2.5-flash-lite-preview-09-2025` fallback
+- Embedding model: `gemini-embedding-001` with 768 dimensions
+- Storage: MongoDB Atlas Vector Search, `resume_chunks` collection, `vector_index` index
+- Build: checked-in Gradle wrapper
 
-## 아키텍처 & 흐름
-1) **Ingestion (재색인)**  
-`resume.json` → `ResumeChunkingService`로 요약/경력/프로젝트 등 청크 생성 → 임베딩 → `MongoVectorAdapter`가 `resume_chunks`에 저장(`chunk_type`, `company`, `skills`, `indexedAt` 메타).
+## Flow
 
-2) **Routing**  
-`LLMRouter`는 LLM 호출 없이 휴리스틱 라우팅만 수행합니다. 정체성/스택 질문 하드블록 → NON_RAG, 이력서 슬롯(회사/프로젝트/스킬 등) 감지 시 RESUME_RAG, 아니면 NON_RAG.
+1. `resume.json` is chunked by `ResumeChunkingService`.
+2. Chunks are embedded and stored through `MongoVectorAdapter`.
+3. `LLMRouter` uses heuristics to choose `RESUME_RAG` or `NON_RAG`.
+4. `ContextRetriever` tries rule-based matches, then vector search.
+5. `ChatService` renders `prompts/*.st` and streams the final answer.
 
-3) **Context Retrieval**  
-`ContextRetriever` 규칙 매칭(이름/관심사/회사/프로젝트 alias 등) → 컨텍스트 반환. 실패 시 Vector 검색(topK=3 기본, 필터는 값 없으면 제거).
+## Endpoints
 
-4) **Generation**  
-`ChatService`가 프롬프트 템플릿(`prompts/*.st`)을 렌더링. RAG는 Markdown 불릿/헤딩으로 응답하도록 지시, 대화용은 페르소나/정체성/스택 고정 안내 포함. 최종 응답 생성 LLM만 호출해 WebSocket으로 스트리밍합니다.
+- WebSocket: `/ws/chat`
+- Admin reindex: `POST /api/admin/resume/reindex`
+- AI fitting: `POST /api/ai-fitting` with `personImage` and `clothingImage`
+- App healthcheck: `GET /api/healthcheck` returns the chat history count
+- Actuator health: `GET /actuator/health`
 
-5) **AI Fitting**  
-`/api/ai-fitting`에서 인물·의상 이미지를 받아 Gemini Vision(REST)으로 합성 이미지 생성. Rate limit(`rate-limit.*`) 적용.
+Admin endpoints fail closed unless `ADMIN_API_KEY` is set. Call them with the matching API key header:
 
-## 주요 구성요소
-- `PromptTemplateService`/`PromptProvider`: `prompts/*.st` 로딩 및 플레이스홀더 치환
-- `LLMRouter`: 정체성 하드블록 + 슬롯 감지 + 라우팅 프롬프트
-- `ContextRetriever`: 규칙 기반 매칭 후 Vector 검색 (필터 fallback)
-- `MongoVectorAdapter`: Atlas VectorStore index/search
-- `GeminiAdapter`: Chat/Streaming 호출, ImageModel(REST) 래퍼
-- `ResumeChunkingService`: resume.json → 청크 생성
-
-## 엔드포인트
-- WebSocket: `/ws/chat` (StreamMessage JSON)
-- Admin: `POST /api/admin/resume/reindex` (재색인)
-- AI Fitting: `POST /api/ai-fitting` (multipart: `personImage`, `clothingImage`)
-- Health: `/api/health`
-
-## 설정
-- 환경변수: `MONGO_URI`, `GEMINI_API_KEY`
-- Atlas 인덱스: `src/main/resources/atlas-index.json`을 Search Index(JSON Editor)에 붙여 `vector_index` 생성
-- Rate limit: `application.yml`의 `rate-limit.requests`, `rate-limit.minutes`
-
-## 실행 절차
 ```bash
-git clone https://github.com/dd3ok/who-am-ai
-cd who-am-ai
-export MONGO_URI="mongodb+srv://<user>:<pw>@cluster/?retryWrites=true&w=majority"
+curl -X POST http://localhost:8080/api/admin/resume/reindex \
+  -H "X-Admin-Api-Key: $ADMIN_API_KEY"
+```
+
+## Configuration
+
+Required:
+
+```bash
+export MONGO_URI="mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority"
 export GEMINI_API_KEY="<google-genai-key>"
+```
+
+Admin key, required for `/api/admin/**`:
+
+```bash
+export ADMIN_API_KEY="<admin-secret>"
+```
+
+Atlas setup:
+
+- Create a Search index named `vector_index` on `resume_chunks`.
+- Use `src/main/resources/atlas-index.json`.
+- Vector path is `content_embedding`.
+
+## Run
+
+Use JDK 21. The project has a Gradle toolchain, but `./gradlew` still needs a JDK 21-capable launcher on `PATH` or in `JAVA_HOME`.
+
+```bash
 ./gradlew bootRun
 ```
-- 재색인: `curl -X POST http://localhost:8080/api/admin/resume/reindex`
-- WebSocket 스모크: `ws://localhost:8080/ws/chat` → `{"uuid":"demo","type":"USER","content":"경력 알려줘"}`
-- AI Fitting: `POST /api/ai-fitting` (multipart로 이미지 2개 업로드)
 
-## 운영/테스트 메모
-- 로그: 라우팅 intent/slots, 검색 topK/필터, 컨텍스트 개수를 DEBUG로 남기면 품질 점검 용이
-- 컨텍스트 비면 즉시 NON_RAG fallback 진행
-- reindex 후 `metadata.indexedAt` 확인으로 반영 여부 점검
-- 정체성/스택 질문은 RAG 미호출, 고정 스택 안내(Repo 링크 포함) 후 도움 제안
-- 메트릭(Actuator): `whoamai.router.decision.total`, `whoamai.chat.request.total`, `whoamai.rag.context.size`, `whoamai.rag.empty_context.total`
-- 라우팅 회귀 평가셋: `src/test/resources/evals/router-eval-cases.json`
-- 품질 회귀 테스트 실행: `./gradlew test --tests "*LLMRouterEvalTest"`
+Smoke checks:
 
-## 향후 개선 아이디어
-- MMR/다양성 검색 실험 및 topK 튜닝
-- slot 감지/필터 적용 로그 + 스모크 자동화로 회귀 방지
-- 하이브리드 검색(벡터+키워드) 또는 rerank 도입 시나리오 검토
+```bash
+curl http://localhost:8080/api/healthcheck
+curl http://localhost:8080/actuator/health
+```
+
+WebSocket message shape:
+
+```json
+{"uuid":"demo","type":"USER","content":"경력 알려줘"}
+```
+
+## Docker
+
+The Docker build uses the checked-in Gradle wrapper and runs tests during `./gradlew build`.
+
+```bash
+docker build -t who-am-ai .
+docker run --rm -p 8080:8080 \
+  -e MONGO_URI="$MONGO_URI" \
+  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+  -e ADMIN_API_KEY="$ADMIN_API_KEY" \
+  who-am-ai
+```
+
+## Tests And Benchmarks
+
+```bash
+./gradlew test
+./gradlew test --tests "*LLMRouterEvalTest"
+./gradlew test --tests "*ContextRetrieverTest"
+```
+
+RAG benchmark prompts live under `src/test/resources/evals/`. Live benchmark-style tests require real `MONGO_URI` and `GEMINI_API_KEY`; keep prompt counts low when tuning:
+
+```bash
+BENCHMARK_MAX_PROMPTS=5 ./scripts/run-threshold-benchmark.sh
+```
+
+Supported benchmark knobs:
+
+- `BENCHMARK_MAX_PROMPTS`: max prompts per threshold for the script.
+- `BENCHMARK_EXTRA_ARGS`: extra Gradle args for the script.
+- `-Dbenchmark.max-prompts=<n>`: max prompts for direct Gradle runs.
+- `-Dbenchmark.prompt-timeout-ms=<ms>`: timeout for answer-generation benchmark tests.
+- `-Drag.search.similarity-threshold=<value>`: override retrieval threshold.
+
+Useful test fixtures:
+
+- Router cases: `src/test/resources/evals/router-eval-cases.json`
+- RAG retrieval prompts: `src/test/resources/evals/rag-benchmark-prompts.txt`
+- Resume QA prompts: `src/test/resources/evals/resume-qa-prompts.txt`

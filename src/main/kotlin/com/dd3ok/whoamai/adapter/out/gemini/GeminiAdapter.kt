@@ -134,18 +134,22 @@ class GeminiAdapter(
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
             val prompt = Prompt(messages, options)
+            var emittedAnyChunk = false
             try {
                 streamingChatModel.stream(prompt)
                     .asFlow()
                     .mapNotNull { aiResponse ->
-                        val text = aiResponse.result?.output?.text ?: return@mapNotNull null
+                        val text = aiResponse.result.output.text ?: return@mapNotNull null
                         text.takeIf { it.isNotBlank() }
                     }
-                    .collect { send(it) }
+                    .collect {
+                        emittedAnyChunk = true
+                        send(it)
+                    }
                 return@channelFlow
             } catch (e: Throwable) {
                 lastError = e
-                if (!isRateLimitException(e) || idx == models.lastIndex) {
+                if (emittedAnyChunk || !isRateLimitException(e) || idx == models.lastIndex) {
                     throw e
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
