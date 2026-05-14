@@ -19,8 +19,11 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Run tests
-        run: ./gradlew test --no-daemon
+      - name: Run build
+        run: ./gradlew build --no-daemon
+
+      - name: Build Docker image
+        run: docker build -t who-am-ai-ci .
 
       - name: Upload test reports
         if: always()

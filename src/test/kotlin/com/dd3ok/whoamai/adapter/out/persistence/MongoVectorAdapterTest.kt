@@ -51,6 +51,39 @@ class MongoVectorAdapterTest {
         val document = captor.value.first()
         assertEquals("summary", document.metadata["chunk_id"])
         assertTrue((document.metadata["index_batch_id"] as? String).orEmpty().isNotBlank())
+        assertTrue((document.metadata["index_batch_started_at"] as? String).orEmpty().isNotBlank())
+    }
+
+    @Test
+    fun `indexResume only removes chunks from older batches`() = runTest {
+        val vectorStore = Mockito.mock(MongoDBAtlasVectorStore::class.java)
+        val mongoTemplate = Mockito.mock(ReactiveMongoTemplate::class.java)
+        val properties = MongoDBAtlasVectorStoreProperties().apply {
+            collectionName = "test_chunks"
+        }
+        Mockito.`when`(mongoTemplate.count(Mockito.any(Query::class.java), Mockito.eq("test_chunks")))
+            .thenReturn(Mono.just(1))
+        Mockito.`when`(mongoTemplate.remove(Mockito.any(Query::class.java), Mockito.eq("test_chunks")))
+            .thenReturn(Mono.just(DeleteResult.acknowledged(1)))
+        val adapter = MongoVectorAdapter(vectorStore, properties, mongoTemplate, 0.65)
+
+        adapter.indexResume(
+            listOf(
+                ResumeChunk(
+                    id = "summary",
+                    type = "summary",
+                    content = "요약",
+                    source = emptyMap()
+                )
+            )
+        )
+
+        val queryCaptor = ArgumentCaptor.forClass(Query::class.java)
+        Mockito.verify(mongoTemplate).remove(queryCaptor.capture(), Mockito.eq("test_chunks"))
+        val deleteQuery = queryCaptor.value.queryObject.toJson()
+        assertTrue(deleteQuery.contains("metadata.index_batch_started_at"), deleteQuery)
+        assertTrue(deleteQuery.contains("\$lt"), deleteQuery)
+        assertTrue(deleteQuery.contains("metadata.index_batch_id"), deleteQuery)
     }
 
     @Test

@@ -78,7 +78,7 @@ WebSocket message shape:
 
 ## Docker
 
-The Docker build uses the checked-in Gradle wrapper and runs tests during `./gradlew build`.
+The Docker build uses the checked-in Gradle wrapper and packages the fixed `app.jar` boot archive.
 
 ```bash
 docker build -t who-am-ai .

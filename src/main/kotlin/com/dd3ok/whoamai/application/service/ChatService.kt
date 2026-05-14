@@ -63,7 +63,11 @@ class ChatService(
         // 3. 최종적으로 컨텍스트 존재 여부에 따라 프롬프트 결정
         val useRagPrompt = relevantContexts.isNotEmpty() || resumeQuestionDetected
         val finalHistory = if (useRagPrompt) {
-            logger.info("Context found. Proceeding with RAG prompt.")
+            if (relevantContexts.isNotEmpty()) {
+                logger.info("Context found. Proceeding with RAG prompt.")
+            } else {
+                logger.info("Resume intent detected but context empty. Proceeding with grounded empty-context RAG prompt.")
+            }
             createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
             logger.info("No context found. Proceeding with conversational prompt.")

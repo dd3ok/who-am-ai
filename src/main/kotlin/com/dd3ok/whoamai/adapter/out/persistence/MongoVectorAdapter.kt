@@ -17,6 +17,7 @@ import org.springframework.data.mongodb.core.query.Query
 import org.springframework.stereotype.Component
 import kotlinx.coroutines.reactor.awaitSingle
 import java.time.Instant
+import java.util.UUID
 
 /**
  * 작업 목적: Spring AI MongoDB Atlas VectorStore를 사용해 이력서 Chunk를 색인·검색한다.
@@ -38,12 +39,14 @@ class MongoVectorAdapter(
             return@withContext 0
         }
 
-        val indexBatchId = Instant.now().toString()
+        val indexBatchStartedAt = Instant.now().toString()
+        val indexBatchId = "$indexBatchStartedAt-${UUID.randomUUID()}"
 
         val documents = chunks.map { chunk ->
             val metadata = buildMetadata(chunk).toMutableMap().apply {
                 putIfAbsent("chunk_id", chunk.id)
                 put("index_batch_id", indexBatchId)
+                put("index_batch_started_at", indexBatchStartedAt)
             }
 
             AiDocument(
@@ -65,7 +68,11 @@ class MongoVectorAdapter(
         val staleBatchQuery = Query(
             Criteria().orOperator(
                 Criteria.where("metadata.index_batch_id").exists(false),
-                Criteria.where("metadata.index_batch_id").ne(indexBatchId)
+                Criteria.where("metadata.index_batch_started_at").exists(false),
+                Criteria().andOperator(
+                    Criteria.where("metadata.index_batch_id").ne(indexBatchId),
+                    Criteria.where("metadata.index_batch_started_at").lt(indexBatchStartedAt)
+                )
             )
         )
         reactiveMongoTemplate.remove(staleBatchQuery, collectionName)
