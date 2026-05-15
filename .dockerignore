@@ -1,0 +1,11 @@
+.git
+.github
+.gradle
+build
+**/build
+out
+tmp
+temp
+*.log
+*.tmp
+.DS_Store

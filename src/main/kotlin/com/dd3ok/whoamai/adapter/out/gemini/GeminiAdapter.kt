@@ -134,18 +134,29 @@ class GeminiAdapter(
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
             val prompt = Prompt(messages, options)
+            var emittedAnyChunk = false
             try {
                 streamingChatModel.stream(prompt)
                     .asFlow()
                     .mapNotNull { aiResponse ->
-                        val text = aiResponse.result?.output?.text ?: return@mapNotNull null
+                        val text = aiResponse.results.firstOrNull()?.output?.text ?: return@mapNotNull null
                         text.takeIf { it.isNotBlank() }
                     }
-                    .collect { send(it) }
-                return@channelFlow
+                    .collect {
+                        emittedAnyChunk = true
+                        send(it)
+                    }
+                if (emittedAnyChunk) {
+                    return@channelFlow
+                }
+                if (idx == models.lastIndex) {
+                    throw IllegalStateException("All models returned empty stream.")
+                }
+                logger.warn("Model $model returned an empty stream. Trying next model.")
+                delay(RETRY_BACKOFF_MS)
             } catch (e: Throwable) {
                 lastError = e
-                if (!isRateLimitException(e) || idx == models.lastIndex) {
+                if (emittedAnyChunk || !isRateLimitException(e) || idx == models.lastIndex) {
                     throw e
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
@@ -166,7 +177,7 @@ class GeminiAdapter(
             val options = buildChatOptions(config, model)
             try {
                 val response = chatModel.call(Prompt(messages, options))
-                val text = response.result.output.text.orEmpty().trim()
+                val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
                 if (text.isNotBlank()) return text
             } catch (e: Throwable) {
                 lastError = e

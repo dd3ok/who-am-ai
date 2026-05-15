@@ -13,13 +13,16 @@ class ResumeFileAdapter(private val objectMapper: ObjectMapper) : LoadResumePort
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override fun load(): Resume {
-        return try {
+        try {
             logger.info("Loading resume data from 'resume.json' file.")
             val resource = ClassPathResource("resume.json")
-            objectMapper.readValue(resource.inputStream, Resume::class.java)
+            if (!resource.exists()) {
+                throw IllegalStateException("resume.json file not found.")
+            }
+            return objectMapper.readValue(resource.inputStream, Resume::class.java)
         } catch (e: Exception) {
-            logger.error("FATAL: Failed to load and parse resume.json. Returning an empty Resume object.", e)
-            Resume()
+            logger.error("FATAL: Failed to load and parse resume.json.", e)
+            throw IllegalStateException("Failed to load and parse resume.json.", e)
         }
     }
 }
