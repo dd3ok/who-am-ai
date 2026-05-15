@@ -39,14 +39,14 @@ class MongoVectorAdapter(
             return@withContext 0
         }
 
-        val indexBatchStartedAt = Instant.now().toString()
-        val indexBatchId = "$indexBatchStartedAt-${UUID.randomUUID()}"
+        val indexBatchStartedAtEpochMs = Instant.now().toEpochMilli()
+        val indexBatchId = "$indexBatchStartedAtEpochMs-${UUID.randomUUID()}"
 
         val documents = chunks.map { chunk ->
             val metadata = buildMetadata(chunk).toMutableMap().apply {
                 putIfAbsent("chunk_id", chunk.id)
                 put("index_batch_id", indexBatchId)
-                put("index_batch_started_at", indexBatchStartedAt)
+                put("index_batch_started_at_epoch_ms", indexBatchStartedAtEpochMs)
             }
 
             AiDocument(
@@ -68,10 +68,10 @@ class MongoVectorAdapter(
         val staleBatchQuery = Query(
             Criteria().orOperator(
                 Criteria.where("metadata.index_batch_id").exists(false),
-                Criteria.where("metadata.index_batch_started_at").exists(false),
+                Criteria.where("metadata.index_batch_started_at_epoch_ms").exists(false),
                 Criteria().andOperator(
                     Criteria.where("metadata.index_batch_id").ne(indexBatchId),
-                    Criteria.where("metadata.index_batch_started_at").lt(indexBatchStartedAt)
+                    Criteria.where("metadata.index_batch_started_at_epoch_ms").lt(indexBatchStartedAtEpochMs)
                 )
             )
         )

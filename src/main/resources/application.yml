@@ -29,8 +29,8 @@ spring:
         image:
           base-url: https://generativelanguage.googleapis.com
           generate-path: "/v1/models/{model}:generateContent"
-          # Keep the image model on the free-tier friendly 2.5 image model.
-          # Gemini 3 image preview models are paid-tier only in the current pricing page.
+          # Image fitting requires paid Gemini API access.
+          # gemini-2.5-flash-image is not available on the Gemini API free tier.
           model-name: gemini-2.5-flash-image
           temperature: 0.3
           seed: 1234

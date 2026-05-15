@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.ArgumentCaptor
 import org.mockito.Mockito
-import org.springframework.ai.document.Document
+import org.springframework.ai.document.Document as AiDocument
 import org.springframework.ai.vectorstore.mongodb.atlas.MongoDBAtlasVectorStore
 import org.springframework.ai.vectorstore.mongodb.autoconfigure.MongoDBAtlasVectorStoreProperties
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
@@ -44,14 +44,14 @@ class MongoVectorAdapterTest {
         assertEquals(1, indexed)
         val inOrder = Mockito.inOrder(vectorStore, mongoTemplate)
         @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<Document>>
+        val captor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<AiDocument>>
         inOrder.verify(vectorStore).add(captor.capture())
         inOrder.verify(mongoTemplate).count(Mockito.any(Query::class.java), Mockito.eq("test_chunks"))
         inOrder.verify(mongoTemplate).remove(Mockito.any(Query::class.java), Mockito.eq("test_chunks"))
         val document = captor.value.first()
         assertEquals("summary", document.metadata["chunk_id"])
         assertTrue((document.metadata["index_batch_id"] as? String).orEmpty().isNotBlank())
-        assertTrue((document.metadata["index_batch_started_at"] as? String).orEmpty().isNotBlank())
+        assertTrue(document.metadata["index_batch_started_at_epoch_ms"] is Number)
     }
 
     @Test
@@ -78,12 +78,42 @@ class MongoVectorAdapterTest {
             )
         )
 
+        @Suppress("UNCHECKED_CAST")
+        val documentCaptor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<AiDocument>>
+        Mockito.verify(vectorStore).add(documentCaptor.capture())
+        val currentBatchId = documentCaptor.value.first().metadata["index_batch_id"]
+        val currentBatchStartedAt = documentCaptor.value.first().metadata["index_batch_started_at_epoch_ms"]
+
         val queryCaptor = ArgumentCaptor.forClass(Query::class.java)
         Mockito.verify(mongoTemplate).remove(queryCaptor.capture(), Mockito.eq("test_chunks"))
-        val deleteQuery = queryCaptor.value.queryObject.toJson()
-        assertTrue(deleteQuery.contains("metadata.index_batch_started_at"), deleteQuery)
-        assertTrue(deleteQuery.contains("\$lt"), deleteQuery)
-        assertTrue(deleteQuery.contains("metadata.index_batch_id"), deleteQuery)
+        val orClauses = queryCaptor.value.queryObject.getList("\$or", org.bson.Document::class.java)
+        assertTrue(
+            orClauses.any {
+                (it["metadata.index_batch_id"] as? org.bson.Document)?.get("\$exists") == false
+            },
+            queryCaptor.value.queryObject.toJson()
+        )
+        assertTrue(
+            orClauses.any {
+                (it["metadata.index_batch_started_at_epoch_ms"] as? org.bson.Document)?.get("\$exists") == false
+            },
+            queryCaptor.value.queryObject.toJson()
+        )
+        val andClauses = orClauses
+            .mapNotNull { it.getList("\$and", org.bson.Document::class.java) }
+            .flatten()
+        assertTrue(
+            andClauses.any {
+                (it["metadata.index_batch_id"] as? org.bson.Document)?.get("\$ne") == currentBatchId
+            },
+            queryCaptor.value.queryObject.toJson()
+        )
+        assertTrue(
+            andClauses.any {
+                (it["metadata.index_batch_started_at_epoch_ms"] as? org.bson.Document)?.get("\$lt") == currentBatchStartedAt
+            },
+            queryCaptor.value.queryObject.toJson()
+        )
     }
 
     @Test

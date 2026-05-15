@@ -64,6 +64,24 @@ class GeminiAdapterTest {
         assertEquals(2, streamingModel.callCount)
     }
 
+    @Test
+    fun `streaming ignores empty generation responses`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.just(
+                    ChatResponse(emptyList()),
+                    chatResponse("ok")
+                )
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val chunks = adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+
+        assertEquals(listOf("ok"), chunks)
+        assertEquals(1, streamingModel.callCount)
+    }
+
     private fun adapter(streamingModel: RecordingStreamingChatModel): GeminiAdapter {
         val chatProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")

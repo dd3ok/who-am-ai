@@ -139,7 +139,7 @@ class GeminiAdapter(
                 streamingChatModel.stream(prompt)
                     .asFlow()
                     .mapNotNull { aiResponse ->
-                        val text = aiResponse.result.output.text ?: return@mapNotNull null
+                        val text = aiResponse.results.firstOrNull()?.output?.text ?: return@mapNotNull null
                         text.takeIf { it.isNotBlank() }
                     }
                     .collect {
