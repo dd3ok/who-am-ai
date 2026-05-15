@@ -82,13 +82,35 @@ class GeminiAdapterTest {
         assertEquals(1, streamingModel.callCount)
     }
 
-    private fun adapter(streamingModel: RecordingStreamingChatModel): GeminiAdapter {
+    @Test
+    fun `non streaming ignores empty generation responses and tries next model`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                ChatResponse(emptyList()),
+                chatResponse("ok")
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val response = adapter.generateContent("hello", "test")
+
+        assertEquals("ok", response)
+        assertEquals(2, chatModel.callCount)
+    }
+
+    private fun adapter(
+        streamingModel: RecordingStreamingChatModel,
+        chatModel: ChatModel = NoopChatModel
+    ): GeminiAdapter {
         val chatProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")
         }
         return GeminiAdapter(
             streamingChatModel = streamingModel,
-            chatModel = NoopChatModel,
+            chatModel = chatModel,
             chatModelProperties = chatProperties,
             imageModelProperties = GeminiImageModelProperties(),
             promptTemplateService = FakePromptProvider,
@@ -103,6 +125,18 @@ class GeminiAdapterTest {
 
         override fun stream(prompt: Prompt): Flux<ChatResponse> {
             val response = responses.getOrElse(callCount) { Flux.error(IllegalStateException("unexpected call")) }
+            callCount += 1
+            return response
+        }
+    }
+
+    private class RecordingChatModel(
+        private val responses: List<ChatResponse>
+    ) : ChatModel {
+        var callCount: Int = 0
+
+        override fun call(prompt: Prompt): ChatResponse {
+            val response = responses.getOrElse(callCount) { chatResponse("") }
             callCount += 1
             return response
         }

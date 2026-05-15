@@ -170,7 +170,7 @@ class GeminiAdapter(
             val options = buildChatOptions(config, model)
             try {
                 val response = chatModel.call(Prompt(messages, options))
-                val text = response.result.output.text.orEmpty().trim()
+                val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
                 if (text.isNotBlank()) return text
             } catch (e: Throwable) {
                 lastError = e

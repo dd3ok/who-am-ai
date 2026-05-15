@@ -50,12 +50,12 @@ Admin key, required for `/api/admin/**`:
 export ADMIN_API_KEY="<admin-secret>"
 ```
 
-## Gemini Free Tier Notes
+## Gemini Model And Quota Notes
 
-The default chat model order favors free-tier friendly Gemini 3 models:
+The default chat model order favors cost-efficient Gemini models, but availability, pricing, and quota can change by model, project, and usage tier:
 
-- `gemini-3.1-flash-lite`: stable, cost-efficient Gemini 3.1 model with free input and output tokens.
-- `gemini-3-flash-preview`: stronger Gemini 3 fallback with free standard input and output tokens, but preview limits can be more restrictive.
+- `gemini-3.1-flash-lite`: cost-efficient Gemini 3.1 Flash-Lite model. Check live availability, pricing, and quota in Google AI Studio.
+- `gemini-3-flash-preview`: stronger Gemini 3 fallback; preview availability and limits can change.
 - `gemini-2.5-flash-lite`: conservative fallback if a Gemini 3 preview endpoint is unavailable or rate-limited.
 
 Google applies Gemini API rate limits per project, not per API key, and daily quotas reset at midnight Pacific time. Exact active RPM/TPM/RPD limits are not fixed in this repo because Google says they vary by model, project, and usage tier; check the live values in Google AI Studio: <https://aistudio.google.com/app/usage>.

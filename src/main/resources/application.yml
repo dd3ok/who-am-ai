@@ -14,8 +14,8 @@ spring:
         api-key: ${GEMINI_API_KEY}
         chat:
           options:
-            # Free-tier friendly Gemini 3 defaults. Exact RPM/TPM/RPD quotas are project-specific.
-            # Check live limits in Google AI Studio: https://aistudio.google.com/app/usage
+            # Cost-efficient Gemini defaults. Check live availability, pricing, and quota:
+            # https://aistudio.google.com/app/usage
             models: [gemini-3.1-flash-lite, gemini-3-flash-preview, gemini-2.5-flash-lite]
             temperature: 0.75
             max-output-tokens: 8192
