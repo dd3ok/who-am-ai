@@ -83,6 +83,22 @@ class GeminiAdapterTest {
     }
 
     @Test
+    fun `streaming fallback is attempted when model completes without text chunks`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.just(ChatResponse(emptyList())),
+                Flux.just(chatResponse("fallback"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val chunks = adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+
+        assertEquals(listOf("fallback"), chunks)
+        assertEquals(2, streamingModel.callCount)
+    }
+
+    @Test
     fun `non streaming ignores empty generation responses and tries next model`() = runTest {
         val chatModel = RecordingChatModel(
             listOf(

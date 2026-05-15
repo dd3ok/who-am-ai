@@ -146,7 +146,14 @@ class GeminiAdapter(
                         emittedAnyChunk = true
                         send(it)
                     }
-                return@channelFlow
+                if (emittedAnyChunk) {
+                    return@channelFlow
+                }
+                if (idx == models.lastIndex) {
+                    throw IllegalStateException("All models returned empty stream.")
+                }
+                logger.warn("Model $model returned an empty stream. Trying next model.")
+                delay(RETRY_BACKOFF_MS)
             } catch (e: Throwable) {
                 lastError = e
                 if (emittedAnyChunk || !isRateLimitException(e) || idx == models.lastIndex) {
