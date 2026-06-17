@@ -128,7 +128,7 @@ private val SELF_CONTAINED_PROFILE_KEYWORDS = listOf(
     "경력", "직무", "회사", "프로젝트", "스킬", "기술", "자격증", "학력", "학교", "전공",
     "mbti", "관심사", "관심", "관심있는", "흥미", "취미",
     "총경력", "전체경력"
-).map(::normalizeResumeQuery)
+).map(::normalizeResumeQuery) + ResumeIntentKeywords.recentActivity
 
 private val BROAD_CAPABILITY_KEYWORDS = listOf(
     "소개", "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션",

@@ -25,7 +25,7 @@ Kotlin/Spring Boot 3 service that chunks a resume JSON, stores embeddings in Mon
 - WebSocket: `/ws/chat`
 - Admin reindex: `POST /api/admin/resume/reindex`
 - AI fitting: `POST /api/ai-fitting` with `personImage` and `clothingImage`
-- App healthcheck: `GET /api/healthcheck` returns the chat history count
+- App healthcheck: `GET /api/healthcheck` returns a lightweight status response
 - Actuator health: `GET /actuator/health`
 
 Admin endpoints fail closed unless `ADMIN_API_KEY` is set. Call them with the matching API key header:

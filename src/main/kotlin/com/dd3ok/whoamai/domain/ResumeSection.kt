@@ -7,6 +7,7 @@ data class Resume(
     val name: String = "",
     val mbti: String = "",
     val summary: String = "",
+    val recentActivities: String = "",
     val blog: String = "",
     val skills: List<String> = emptyList(),
     val certificates: List<Certificate> = emptyList(),

@@ -22,6 +22,7 @@ class ContextRetrieverTest {
     private val resume = Resume(
         name = "유인재",
         summary = "요약",
+        recentActivities = "퇴사 이후에는 AI 에이전트와 백엔드 시스템 설계 역량을 중심으로 개인 프로젝트를 진행하고 있습니다.",
         interests = listOf("AI 서비스", "MSA"),
         skills = listOf("Spring Boot"),
         experiences = listOf(
@@ -92,6 +93,46 @@ class ContextRetrieverTest {
 
         assertEquals(1, result.size)
         assertTrue(result.first().contains(expected))
+    }
+
+    @Test
+    fun `post resignation status questions return recent activities chunk`() = runTest {
+        val expected = "RECENT_ACTIVITIES"
+        persistencePort.stub(ChunkIdGenerator.forRecentActivities(), expected)
+
+        val result = contextRetriever.retrieveByRule("퇴사 이후에는 뭐하고 지내나요?")
+
+        assertEquals(1, result.size)
+        assertTrue(result.first().contains(expected))
+    }
+
+    @Test
+    fun `recent activity status questions return recent activities chunk`() = runTest {
+        val expected = "RECENT_ACTIVITIES"
+        persistencePort.stub(ChunkIdGenerator.forRecentActivities(), expected)
+
+        val result = contextRetriever.retrieveByRule("요즘 뭐 하고 있어?")
+
+        assertEquals(1, result.size)
+        assertTrue(result.first().contains(expected))
+    }
+
+    @Test
+    fun `casual recent chat does not return recent activities chunk`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forRecentActivities(), "RECENT_ACTIVITIES")
+
+        val result = contextRetriever.retrieveByRule("요즘 뭐 먹어?")
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `external subject recent status question does not return recent activities chunk`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forRecentActivities(), "RECENT_ACTIVITIES")
+
+        val result = contextRetriever.retrieveByRule("당근은 퇴사 후 뭐하고 있어?")
+
+        assertTrue(result.isEmpty())
     }
 
     @Test

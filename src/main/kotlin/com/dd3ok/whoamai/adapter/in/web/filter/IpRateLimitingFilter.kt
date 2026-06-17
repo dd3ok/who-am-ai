@@ -15,7 +15,8 @@ import reactor.core.publisher.Mono
 class IpRateLimitingFilter(
     private val rateLimiterService: RateLimiterService,
     @Value("\${rate-limit.bypass-parameter.name:}") private val bypassParamName: String,
-    @Value("\${rate-limit.bypass-parameter.value:}") private val bypassParamValue: String
+    @Value("\${rate-limit.bypass-parameter.value:}") private val bypassParamValue: String,
+    @Value("\${rate-limit.trust-forwarded-headers:false}") private val trustForwardedHeaders: Boolean = false
 ) : WebFilter {
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
@@ -27,10 +28,7 @@ class IpRateLimitingFilter(
                 return chain.filter(exchange)
             }
 
-            // 클라이언트 IP 주소 가져오기 (리버스 프록시 환경 고려)
-            val ip = request.headers.getFirst("X-Forwarded-For")
-                ?: request.remoteAddress?.address?.hostAddress
-                ?: "unknown"
+            val ip = resolveClientIp(exchange)
 
             if (ip == "unknown") {
                 // IP를 알 수 없는 경우 요청 거부
@@ -47,5 +45,18 @@ class IpRateLimitingFilter(
 
         // 허용된 경우 다음 필터 또는 핸들러로 요청 전달
         return chain.filter(exchange)
+    }
+
+    private fun resolveClientIp(exchange: ServerWebExchange): String {
+        val request = exchange.request
+        if (trustForwardedHeaders) {
+            request.headers.getFirst("X-Forwarded-For")
+                ?.split(',')
+                ?.firstOrNull()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
+        return request.remoteAddress?.address?.hostAddress ?: "unknown"
     }
 }

@@ -27,6 +27,7 @@ class ContextRetriever(
 
     private val rules: List<(RuleContext) -> String?> by lazy {
         listOf(
+            { ctx -> if (RECENT_ACTIVITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forRecentActivities() else null },
             { ctx -> if (TOTAL_EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
             { ctx -> if (PROJECT_KEYWORDS.any { ctx.query.contains(it) }) "projects" else null },
             { ctx -> if (EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) "experiences" else null },
@@ -278,6 +279,9 @@ class ContextRetriever(
         if (PERSONALITY_KEYWORDS.any { normalizedQuery.contains(it) }) {
             prefer("personality", 16)
         }
+        if (RECENT_ACTIVITY_KEYWORDS.any { normalizedQuery.contains(it) }) {
+            prefer("recent_activity", 16)
+        }
         if (TOTAL_EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) }) {
             prefer("summary", 16)
         }
@@ -308,6 +312,7 @@ class ContextRetriever(
 
     private fun isProfileFocusedQuery(normalizedQuery: String): Boolean {
         return TOTAL_EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) } ||
+            RECENT_ACTIVITY_KEYWORDS.any { normalizedQuery.contains(it) } ||
             EDU_KEYWORDS.any { normalizedQuery.contains(it) } ||
             CERTIFICATE_KEYWORDS.any { normalizedQuery.contains(it) } ||
             INTEREST_KEYWORDS.any { normalizedQuery.contains(it) } ||
@@ -372,6 +377,7 @@ private fun normalizedKeywords(vararg keywords: String): List<String> =
     keywords.map { it.replace(Regex("\\s+"), "").lowercase() }
 
 private val INTRO_KEYWORDS = normalizedKeywords("누구야", "누구세요", "소개", "자기소개", "소개해줘")
+private val RECENT_ACTIVITY_KEYWORDS = ResumeIntentKeywords.recentActivity
 private val TOTAL_EXPERIENCE_KEYWORDS = normalizedKeywords("총 경력", "총경력", "전체경력")
 private val PROJECT_KEYWORDS = normalizedKeywords("프로젝트", "project")
 private val EXPERIENCE_KEYWORDS = normalizedKeywords("경력", "이력", "회사")
@@ -394,6 +400,7 @@ private fun isSpecificResumeSlotQuery(normalizedQuery: String): Boolean {
     val slotKeywords = TOTAL_EXPERIENCE_KEYWORDS +
         PROJECT_KEYWORDS +
         EXPERIENCE_KEYWORDS +
+        RECENT_ACTIVITY_KEYWORDS +
         CERTIFICATE_KEYWORDS +
         INTEREST_KEYWORDS +
         SKILL_KEYWORDS +

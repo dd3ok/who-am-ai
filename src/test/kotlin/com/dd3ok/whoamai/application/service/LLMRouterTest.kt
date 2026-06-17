@@ -17,6 +17,7 @@ class LLMRouterTest {
     private val resume = Resume(
         name = "유인재",
         summary = "백엔드 개발자",
+        recentActivities = "퇴사 이후에는 AI 에이전트와 백엔드 시스템 설계 역량을 중심으로 개인 프로젝트를 진행하고 있습니다.",
         blog = "",
         experiences = listOf(
             Experience(
@@ -160,6 +161,54 @@ class LLMRouterTest {
         val decision = router.route("인재님은 어떤 기술들을 사용하나요")
 
         assertEquals(QueryType.RESUME_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `post resignation status question should route to RESUME_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("퇴사 이후에는 뭐하고 지내나요?")
+
+        assertEquals(QueryType.RESUME_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `recent activity status question should route to RESUME_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("요즘 뭐 하고 있어?")
+
+        assertEquals(QueryType.RESUME_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `external subject recent status question should stay NON_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("당근은 퇴사 후 뭐하고 있어?")
+
+        assertEquals(QueryType.NON_RAG, decision.queryType)
+    }
+
+    @Test
+    fun `casual recent chat should stay NON_RAG`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+
+        val decision = router.route("요즘 뭐 먹어?")
+
+        assertEquals(QueryType.NON_RAG, decision.queryType)
     }
 
     @Test

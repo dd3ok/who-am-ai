@@ -4,6 +4,8 @@ import com.dd3ok.whoamai.application.port.`in`.AIFittingUseCase
 import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.core.io.buffer.DataBufferLimitException
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE
 import org.springframework.http.ResponseEntity
@@ -37,7 +39,7 @@ class AIFittingController(
             val clothingBytes = readBytes(clothingImageFile)
 
             if (personBytes.size > maxBytes || clothingBytes.size > maxBytes) {
-                ResponseEntity.status(413).build()
+                ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build()
             } else {
                 val resultImage = aiFittingUseCase.generateStyledImage(personBytes, clothingBytes)
 
@@ -50,6 +52,10 @@ class AIFittingController(
                     .contentType(resolvedMediaType)
                     .body(resultImage)
             }
+        } catch (e: PayloadTooLargeException) {
+            ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build()
+        } catch (e: DataBufferLimitException) {
+            ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build()
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().build()
         } catch (e: Exception) {
@@ -58,11 +64,14 @@ class AIFittingController(
     }
 
     private suspend fun readBytes(filePart: FilePart): ByteArray {
-        val dataBuffer = DataBufferUtils.join(filePart.content()).awaitSingle()
-        val bytes = ByteArray(dataBuffer.readableByteCount())
-        dataBuffer.read(bytes)
-        DataBufferUtils.release(dataBuffer)
-        return bytes
+        val dataBuffer = DataBufferUtils.join(filePart.content(), maxBytes).awaitSingle()
+        try {
+            val bytes = ByteArray(dataBuffer.readableByteCount())
+            dataBuffer.read(bytes)
+            return bytes
+        } finally {
+            DataBufferUtils.release(dataBuffer)
+        }
     }
 
     private fun validateFilePart(name: String, filePart: FilePart) {
@@ -74,7 +83,9 @@ class AIFittingController(
 
         val contentLength = filePart.headers().contentLength
         if (contentLength > 0 && contentLength > maxBytes) {
-            throw IllegalArgumentException("$name: 파일 크기가 허용 한도(5MB)를 초과했습니다.")
+            throw PayloadTooLargeException("$name: 파일 크기가 허용 한도(5MB)를 초과했습니다.")
         }
     }
+
+    private class PayloadTooLargeException(message: String) : RuntimeException(message)
 }
