@@ -179,18 +179,23 @@ class GeminiAdapter(
                 val response = chatModel.call(Prompt(messages, options))
                 val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
                 if (text.isNotBlank()) return text
+                if (idx == models.lastIndex) {
+                    throw IllegalStateException("All models returned empty response.")
+                }
+                logger.warn("Model $model returned an empty response. Trying next model.")
+                delay(RETRY_BACKOFF_MS)
             } catch (e: Throwable) {
                 lastError = e
                 if (!isRateLimitException(e) || idx == models.lastIndex) {
                     logger.error("Chat call failed on model $model: ${e.message}", e)
-                    return ""
+                    throw e
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
                 delay(RETRY_BACKOFF_MS)
             }
         }
-        logger.error("All models exhausted. lastError=${lastError?.message}")
-        return ""
+        lastError?.let { throw it }
+        throw IllegalStateException("All models returned empty response.")
     }
 
     private fun isRateLimitException(e: Throwable): Boolean {

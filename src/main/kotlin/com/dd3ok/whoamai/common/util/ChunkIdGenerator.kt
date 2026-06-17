@@ -13,6 +13,7 @@ object ChunkIdGenerator {
     fun forProject(title: String): String = "project_${sanitize(title)}"
     fun forExperience(company: String): String = "experience_${sanitize(company)}"
     fun forSummary(): String = "summary"
+    fun forRecentActivities(): String = "recent_activities"
     fun forTotalExperience(): String = "experience_total_summary"
     fun forSkills(): String = "skills"
     fun forEducation(): String = "education"

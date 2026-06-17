@@ -24,6 +24,7 @@ class ResumeChunkingService(
 
             chunks.add(createSummaryChunk(resume))
             chunks.add(createSkillsChunk(resume))
+            createRecentActivitiesChunk(resume)?.let { chunks.add(it) }
             chunks.add(createTotalExperienceChunk(resume))
             createEducationChunk(resume)?.let { chunks.add(it) }
             createCertificatesChunk(resume)?.let { chunks.add(it) }
@@ -55,9 +56,20 @@ class ResumeChunkingService(
                 mapOf(
                     "name" to resume.name,
                     "summary" to resume.summary,
+                    "recentActivities" to resume.recentActivities,
                     "blog" to resume.blog
                 )
             )
+        )
+    }
+
+    private fun createRecentActivitiesChunk(resume: Resume): ResumeChunk? {
+        if (resume.recentActivities.isBlank()) return null
+        return ResumeChunk(
+            id = ChunkIdGenerator.forRecentActivities(),
+            type = "recent_activity",
+            content = "퇴사 이후 최근 활동은 다음과 같습니다. ${resume.recentActivities}",
+            source = objectMapper.convertValue(mapOf("recentActivities" to resume.recentActivities))
         )
     }
 

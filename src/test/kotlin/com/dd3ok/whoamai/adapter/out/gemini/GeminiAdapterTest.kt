@@ -18,6 +18,7 @@ import org.springframework.ai.image.ImagePrompt
 import org.springframework.ai.image.ImageResponse
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class GeminiAdapterTest {
 
@@ -117,6 +118,109 @@ class GeminiAdapterTest {
         assertEquals(2, chatModel.callCount)
     }
 
+    @Test
+    fun `non streaming fallback is attempted when rate limit happens before response`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                RuntimeException("429 quota exhausted"),
+                chatResponse("fallback")
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val response = adapter.generateContent("hello", "test")
+
+        assertEquals("fallback", response)
+        assertEquals(2, chatModel.callCount)
+    }
+
+    @Test
+    fun `non streaming propagates non rate limit errors without fallback`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                IllegalStateException("boom"),
+                chatResponse("fallback")
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            adapter.generateContent("hello", "test")
+        }
+
+        assertEquals("boom", error.message)
+        assertEquals(1, chatModel.callCount)
+    }
+
+    @Test
+    fun `non streaming throws final non rate limit error`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                chatResponse(""),
+                RuntimeException("provider unavailable")
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val error = assertFailsWith<RuntimeException> {
+            adapter.generateContent("hello", "test")
+        }
+
+        assertEquals("provider unavailable", error.message)
+        assertEquals(2, chatModel.callCount)
+    }
+
+    @Test
+    fun `non streaming throws when all models return empty responses`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                chatResponse(""),
+                ChatResponse(emptyList())
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            adapter.generateContent("hello", "test")
+        }
+
+        assertEquals("All models returned empty response.", error.message)
+        assertEquals(2, chatModel.callCount)
+    }
+
+    @Test
+    fun `non streaming propagates final rate limit after priorities are exhausted`() = runTest {
+        val chatModel = RecordingChatModel(
+            listOf(
+                RuntimeException("429 first"),
+                RuntimeException("429 final")
+            )
+        )
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        val error = assertFailsWith<RuntimeException> {
+            adapter.generateContent("hello", "test")
+        }
+
+        assertEquals("429 final", error.message)
+        assertEquals(2, chatModel.callCount)
+    }
+
     private fun adapter(
         streamingModel: RecordingStreamingChatModel,
         chatModel: ChatModel = NoopChatModel
@@ -147,14 +251,17 @@ class GeminiAdapterTest {
     }
 
     private class RecordingChatModel(
-        private val responses: List<ChatResponse>
+        private val responses: List<Any>
     ) : ChatModel {
         var callCount: Int = 0
 
         override fun call(prompt: Prompt): ChatResponse {
             val response = responses.getOrElse(callCount) { chatResponse("") }
             callCount += 1
-            return response
+            if (response is Throwable) {
+                throw response
+            }
+            return response as ChatResponse
         }
     }
 

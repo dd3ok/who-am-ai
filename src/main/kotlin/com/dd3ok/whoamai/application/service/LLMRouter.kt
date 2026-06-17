@@ -60,7 +60,7 @@ class LLMRouter(
             "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션",
             "트러블슈팅", "성능", "장애", "개선", "최적화", "아키텍처", "msa", "ddd",
             "자동화", "배치", "테스트", "품질", "보안", "인증", "인가", "학습"
-        ).map { it.lowercase() }
+        ).map(::normalizeResumeQuery) + ResumeIntentKeywords.recentActivity
 
         private val STOPWORDS = setOf(
             "알려줘", "말해줘", "설명", "설명해줘", "어떻게", "무엇", "뭐", "대한", "관련", "정리", "좀", "주세요"

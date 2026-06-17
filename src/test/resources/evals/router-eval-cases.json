@@ -7,6 +7,8 @@
   {"question":"관심사가 뭐야?","expectedType":"RESUME_RAG"},
   {"question":"취미가 뭐야?","expectedType":"RESUME_RAG"},
   {"question":"총 경력 몇 년이야?","expectedType":"RESUME_RAG"},
+  {"question":"퇴사 이후에는 뭐하고 지내나요?","expectedType":"RESUME_RAG"},
+  {"question":"요즘 뭐 하고 있어?","expectedType":"RESUME_RAG"},
   {"question":"유인재의 협업 방식과 커뮤니케이션 강점을 알려줘","expectedType":"RESUME_RAG"},
   {"question":"유인재의 트러블슈팅 경험 중 가장 임팩트 있었던 사례는?","expectedType":"RESUME_RAG"},
   {"question":"백엔드 아키텍처 관련 강점이 뭐야?","expectedType":"NON_RAG"},
@@ -18,6 +20,8 @@
   {"question":"보안 어떻게 공부해?","expectedType":"NON_RAG"},
   {"question":"유인재의 보안 경험 알려줘","expectedType":"RESUME_RAG"},
   {"question":"당근은 어떤 기술을 쓰나요","expectedType":"NON_RAG"},
+  {"question":"당근은 퇴사 후 뭐하고 있어?","expectedType":"NON_RAG"},
+  {"question":"요즘 뭐 먹어?","expectedType":"NON_RAG"},
   {"question":"오늘 날씨 알려줘","expectedType":"NON_RAG"},
   {"question":"주말 여행지 추천해줘","expectedType":"NON_RAG"}
 ]
