@@ -5,9 +5,13 @@ import com.dd3ok.whoamai.domain.Period
 import com.dd3ok.whoamai.domain.Project
 import com.dd3ok.whoamai.domain.Resume
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class ResumeChunkingServiceTest {
 
@@ -71,5 +75,22 @@ class ResumeChunkingServiceTest {
         assertTrue(recentActivitiesChunk.content.contains("퇴사 이후"))
         assertTrue(recentActivitiesChunk.content.contains("Python 기반 파이프라인"))
         assertTrue(recentActivitiesChunk.content.contains("시스템 디자인"))
+    }
+
+    @Test
+    fun `chunk generation should propagate mapping failures`() {
+        val service = ResumeChunkingService(FailingObjectMapper())
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            service.generateChunks(Resume(name = "tester"))
+        }
+
+        assertEquals("conversion failed", error.message)
+    }
+
+    private class FailingObjectMapper : ObjectMapper() {
+        override fun <T> convertValue(fromValue: Any?, toValueRef: TypeReference<T>): T {
+            throw IllegalArgumentException("conversion failed")
+        }
     }
 }

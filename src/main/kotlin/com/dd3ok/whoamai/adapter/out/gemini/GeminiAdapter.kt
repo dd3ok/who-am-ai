@@ -2,7 +2,6 @@ package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
-import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.Dispatchers
@@ -21,25 +20,14 @@ import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions
-import org.springframework.ai.image.ImageModel
-import org.springframework.ai.image.ImagePrompt
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
-import java.util.*
 
-/**
- * 작업 목적: Google GenAI 텍스트 경로는 Spring AI ChatModel/StreamingChatModel을 사용하고, 이미지 생성은 SDK Client를 사용한다.
- * 주요 로직: 도메인 `ChatMessage`를 Spring AI 메시지로 변환한 뒤 Prompt + 옵션을 구성해 호출하고, 이미지 전용 API는 Spring AI ImageModel 추상화를 통해 호출한다.
- */
 @Component
 class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
     private val chatModel: ChatModel,
     private val chatModelProperties: GeminiChatModelProperties,
-    private val imageModelProperties: GeminiImageModelProperties,
-    private val promptTemplateService: PromptProvider,
-    @Qualifier("geminiAIFittingImageModel")
-    private val imageModel: ImageModel
+    private val promptTemplateService: PromptProvider
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -63,41 +51,12 @@ class GeminiAdapter(
 
     override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
         val callConfig = defaultConfig()
-
         val messages = mutableListOf<Message>()
+
         callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
         messages += UserMessage(prompt)
 
         return@withContext callWithPriorities(messages, callConfig)
-    }
-
-    /** 이미지 피팅 모델에 두 이미지 바이트를 전달해 생성 결과(base64)를 디코딩한다. */
-    override suspend fun generateStyledImage(
-        personImageFile: ByteArray,
-        clothingImageFile: ByteArray
-    ): ByteArray = withContext(Dispatchers.IO) {
-        val options = GeminiFittingImageOptions(
-            personImageFile,
-            clothingImageFile,
-            imageModelProperties.mimeType,
-            imageModelProperties.modelName,
-            imageModelProperties.temperature,
-            imageModelProperties.seed
-        )
-        val prompt = ImagePrompt(AI_FITTING_PROMPT, options)
-        val response = imageModel.call(prompt)
-        val generation = response.result
-        val base64 = generation.output.b64Json
-            ?: throw IllegalStateException("Gemini ImageModel returned empty image payload.")
-        if (base64.isBlank()) {
-            throw IllegalStateException("Gemini ImageModel returned empty image payload.")
-        }
-        try {
-            Base64.getDecoder().decode(base64)
-        } catch (e: IllegalArgumentException) {
-            logger.error("Failed to decode Gemini image payload: ${e.message}", e)
-            throw e
-        }
     }
 
     private fun defaultConfig(): ChatPurposeConfig {
@@ -109,12 +68,11 @@ class GeminiAdapter(
     }
 
     private fun buildChatOptions(config: ChatPurposeConfig, model: String): GoogleGenAiChatOptions {
-        val builder = GoogleGenAiChatOptions.builder()
+        return GoogleGenAiChatOptions.builder()
             .model(model)
             .temperature(config.temperature)
             .maxOutputTokens(config.maxOutputTokens)
-
-        return builder.build()
+            .build()
     }
 
     private fun buildPromptMessages(history: List<ChatMessage>, systemInstruction: String?): List<Message> {
@@ -124,17 +82,18 @@ class GeminiAdapter(
         return messages
     }
 
-    /** 모델 우선순위를 순회하며 스트리밍 응답을 첫 성공 모델에서 반환한다. */
     private fun streamWithPriorities(
         messages: List<Message>,
         config: ChatPurposeConfig
     ): Flow<String> = channelFlow {
         var lastError: Throwable? = null
         val models = config.models ?: modelPriority()
+
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
+
             try {
                 streamingChatModel.stream(prompt)
                     .asFlow()
@@ -146,6 +105,7 @@ class GeminiAdapter(
                         emittedAnyChunk = true
                         send(it)
                     }
+
                 if (emittedAnyChunk) {
                     return@channelFlow
                 }
@@ -163,18 +123,20 @@ class GeminiAdapter(
                 delay(RETRY_BACKOFF_MS)
             }
         }
+
         lastError?.let { throw it }
     }
 
-    /** 모델 우선순위를 순회하며 첫 비어있지 않은 텍스트 응답을 반환한다. */
     private suspend fun callWithPriorities(
         messages: List<Message>,
         config: ChatPurposeConfig
     ): String {
         val models = config.models ?: modelPriority()
         var lastError: Throwable? = null
+
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
+
             try {
                 val response = chatModel.call(Prompt(messages, options))
                 val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
@@ -195,6 +157,7 @@ class GeminiAdapter(
                 }
             }
         }
+
         lastError?.let {
             logger.error("All models exhausted. lastError=${it.message}", it)
             throw it
@@ -208,12 +171,10 @@ class GeminiAdapter(
     }
 
     private fun modelPriority(): List<String> {
-        val configured = chatModelProperties.models.takeIf { it.isNotEmpty() }
+        return chatModelProperties.models.takeIf { it.isNotEmpty() }
             ?: listOfNotNull(chatModelProperties.model.takeIf { it.isNotBlank() })
-        return configured
     }
 
-    /** 도메인 메시지를 Spring AI 메시지 타입으로 치환한다. */
     private fun toAiMessage(chatMessage: ChatMessage): Message {
         return when (chatMessage.role.lowercase()) {
             "system" -> SystemMessage(chatMessage.text)
@@ -224,40 +185,5 @@ class GeminiAdapter(
 
     companion object {
         private const val RETRY_BACKOFF_MS = 300L
-
-        private val AI_FITTING_PROMPT = """
-<prompt>
-  <meta>
-    <directive>Task: Garment Replacement. All instructions are binding constraints.</directive>
-    <directive>Redraw from scratch. Do not collage or paste.</directive>
-  </meta>
-
-  <thought_process>
-    <step name="1. DECONSTRUCT">
-      <instruction>Conceptually deconstruct the input images into core components:</instruction>
-      <component id="STYLE">From input image 1: Isolate the visual style of the GARMENT(S) (color, texture, pattern, shape). Ignore the person wearing it and the background.</component>
-      <component id="PERSON">From input image 2: Isolate the PERSON (face, body, pose, hair).</component>
-      <component id="SCENE">From input image 2: Isolate the BACKGROUND and lighting conditions.</component>
-    </step>
-
-    <step name="2. REPLACE">
-      <instruction>On the isolated <PERSON> component, identify and completely remove the original clothing. This creates a "blank canvas" on the person's body where the new garment will be placed.</instruction>
-    </step>
-
-    <step name="3. REASSEMBLE">
-      <instruction>Reassemble the components into a new, final image:</instruction>
-      <assembly_step>Start with the original <SCENE>.</assembly_step>
-      <assembly_step>Place the <PERSON> (now without their original clothes) into the <SCENE>.</assembly_step>
-      <assembly_step>Redraw the <STYLE> component onto the person's body, making it fit the pose and body shape naturally. The lighting on the new garment must match the <SCENE>.</assembly_step>
-    </step>
-  </thought_process>
-
-  <absolute_rules>
-    <rule priority="1">The <PERSON> and <SCENE> components from input image 2 are locked. They MUST NOT be altered. This is the highest priority.</rule>
-    <rule>The replacement must be perfect. No traces of the original clothing should remain.</rule>
-    <rule>If the <STYLE> component includes both a top and a bottom, replace both on the target.</rule>
-  </absolute_rules>
-</prompt>
-        """.trimIndent()
     }
 }
