@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.application.service.agent.CareerToolProvider
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -12,13 +13,13 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import org.springframework.ai.chat.client.ChatClient
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.messages.Message
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.StreamingChatModel
-import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions
 import org.springframework.stereotype.Component
 
@@ -26,8 +27,10 @@ import org.springframework.stereotype.Component
 class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
     private val chatModel: ChatModel,
+    private val chatClientBuilder: ChatClient.Builder,
     private val chatModelProperties: GeminiChatModelProperties,
-    private val promptTemplateService: PromptProvider
+    private val promptTemplateService: PromptProvider,
+    private val careerToolProvider: CareerToolProvider
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -88,14 +91,22 @@ class GeminiAdapter(
     ): Flow<String> = channelFlow {
         var lastError: Throwable? = null
         val models = config.models ?: modelPriority()
+        val careerTools = careerToolProvider.tools()
 
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
-            val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
 
             try {
-                streamingChatModel.stream(prompt)
+                chatClientBuilder
+                    .clone()
+                    .defaultOptions(options)
+                    .build()
+                    .prompt()
+                    .messages(messages)
+                    .tools(*careerTools)
+                    .stream()
+                    .chatResponse()
                     .asFlow()
                     .mapNotNull { aiResponse ->
                         val text = aiResponse.results.firstOrNull()?.output?.text ?: return@mapNotNull null
@@ -138,8 +149,15 @@ class GeminiAdapter(
             val options = buildChatOptions(config, model)
 
             try {
-                val response = chatModel.call(Prompt(messages, options))
-                val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
+                val response = chatClientBuilder
+                    .clone()
+                    .defaultOptions(options)
+                    .build()
+                    .prompt()
+                    .messages(messages)
+                    .call()
+                    .chatResponse()
+                val text = response?.results?.firstOrNull()?.output?.text.orEmpty().trim()
                 if (text.isNotBlank()) return text
                 if (idx != models.lastIndex) {
                     logger.warn("Model $model returned an empty response. Trying next model.")

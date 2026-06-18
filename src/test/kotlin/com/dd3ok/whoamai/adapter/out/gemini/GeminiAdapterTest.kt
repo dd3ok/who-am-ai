@@ -2,16 +2,19 @@ package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
+import com.dd3ok.whoamai.application.service.agent.CareerToolProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.springframework.ai.chat.client.ChatClient
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.tool.annotation.Tool
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -41,7 +44,7 @@ class GeminiAdapterTest {
         }
 
         assertEquals("429 quota exhausted", error?.message)
-        assertEquals(emptyList(), chunks)
+        assertEquals(listOf("partial"), chunks)
         assertEquals(1, streamingModel.callCount)
     }
 
@@ -96,6 +99,35 @@ class GeminiAdapterTest {
     }
 
     @Test
+    fun `streaming prompt keeps selected model and user message`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(Flux.just(chatResponse("ok")))
+        )
+        val adapter = adapter(streamingModel)
+
+        adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+
+        assertEquals("primary", streamingModel.prompts.single().options.model)
+        assertEquals("user", streamingModel.prompts.single().instructions.last().messageType.value)
+    }
+
+    @Test
+    fun `chat responses request career tools`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(Flux.just(chatResponse("ok")))
+        )
+        val toolProvider = RecordingCareerToolProvider()
+        val adapter = adapter(
+            streamingModel = streamingModel,
+            careerToolProvider = toolProvider
+        )
+
+        adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+
+        assertEquals(1, toolProvider.callCount)
+    }
+
+    @Test
     fun `non streaming ignores empty generation responses and tries next model`() = runTest {
         val chatModel = RecordingChatModel(
             listOf(
@@ -112,6 +144,20 @@ class GeminiAdapterTest {
 
         assertEquals("ok", response)
         assertEquals(2, chatModel.callCount)
+    }
+
+    @Test
+    fun `non streaming prompt keeps selected model and user message`() = runTest {
+        val chatModel = RecordingChatModel(listOf(chatResponse("ok")))
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatModel = chatModel
+        )
+
+        adapter.generateContent("hello", "test")
+
+        assertEquals("primary", chatModel.prompts.single().options.model)
+        assertEquals("user", chatModel.prompts.single().instructions.last().messageType.value)
     }
 
     @Test
@@ -219,7 +265,8 @@ class GeminiAdapterTest {
 
     private fun adapter(
         streamingModel: RecordingStreamingChatModel,
-        chatModel: ChatModel = NoopChatModel
+        chatModel: ChatModel = streamingModel,
+        careerToolProvider: CareerToolProvider = EmptyCareerToolProvider
     ): GeminiAdapter {
         val chatProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")
@@ -227,17 +274,44 @@ class GeminiAdapterTest {
         return GeminiAdapter(
             streamingChatModel = streamingModel,
             chatModel = chatModel,
+            chatClientBuilder = ChatClient.builder(chatModel),
             chatModelProperties = chatProperties,
-            promptTemplateService = FakePromptProvider
+            promptTemplateService = FakePromptProvider,
+            careerToolProvider = careerToolProvider
         )
+    }
+
+    private object EmptyCareerToolProvider : CareerToolProvider {
+        override fun tools(): Array<Any> = emptyArray()
+    }
+
+    private class RecordingCareerToolProvider : CareerToolProvider {
+        var callCount: Int = 0
+
+        override fun tools(): Array<Any> {
+            callCount += 1
+            return arrayOf(TestCareerTool())
+        }
+    }
+
+    private class TestCareerTool {
+        @Tool(name = "test_career_tool", description = "test tool")
+        fun call(): String = "ok"
     }
 
     private class RecordingStreamingChatModel(
         private val responses: List<Flux<ChatResponse>>
-    ) : org.springframework.ai.chat.model.StreamingChatModel {
+    ) : ChatModel {
         var callCount: Int = 0
+        val prompts = mutableListOf<Prompt>()
+
+        override fun call(prompt: Prompt): ChatResponse {
+            prompts += prompt
+            return chatResponse("")
+        }
 
         override fun stream(prompt: Prompt): Flux<ChatResponse> {
+            prompts += prompt
             val response = responses.getOrElse(callCount) { Flux.error(IllegalStateException("unexpected call")) }
             callCount += 1
             return response
@@ -248,8 +322,10 @@ class GeminiAdapterTest {
         private val responses: List<Any>
     ) : ChatModel {
         var callCount: Int = 0
+        val prompts = mutableListOf<Prompt>()
 
         override fun call(prompt: Prompt): ChatResponse {
+            prompts += prompt
             val response = responses.getOrElse(callCount) { chatResponse("") }
             callCount += 1
             if (response is Throwable) {

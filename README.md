@@ -104,6 +104,7 @@ docker run --rm -p 8080:8080 \
 ./gradlew test
 ./gradlew test --tests "*LLMRouterEvalTest"
 ./gradlew test --tests "*ContextRetrieverTest"
+./gradlew test --tests "*CareerAgentGoldenEvalTest"
 ```
 
 RAG benchmark prompts live under `src/test/resources/evals/`. Live benchmark-style tests require real `MONGO_URI` and `GEMINI_API_KEY`; keep prompt counts low when tuning:

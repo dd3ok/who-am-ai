@@ -5,6 +5,8 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
+import com.dd3ok.whoamai.application.service.agent.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.agent.CareerPromptAssembler
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -27,22 +29,7 @@ class ChatServiceTest {
     @Test
     fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-1", type = MessageType.USER, content = "유인재의 백엔드 아키텍처 관련 강점이 뭐야?")
@@ -66,21 +53,9 @@ class ChatServiceTest {
         }
         chatHistoryRepository.seed("user-1", ChatHistory("user-1", existingHistory))
 
-        val service = ChatService(
+        val service = createService(
             geminiPort = geminiPort,
-            chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
+            chatHistoryRepository = chatHistoryRepository
         )
 
         service.streamChatResponse(
@@ -95,22 +70,7 @@ class ChatServiceTest {
     @Test
     fun `declarative chat mentioning resume falls back to conversational prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-2", type = MessageType.USER, content = "어제 어떤 사람 이력서를 봤는데 별로였어")
@@ -123,22 +83,7 @@ class ChatServiceTest {
     @Test
     fun `own service implementation question should use rag prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-3", type = MessageType.USER, content = "이 서비스는 어떤 기술로 만들었나요")
@@ -163,21 +108,11 @@ class ChatServiceTest {
             )
         )
         val persistencePort = HistoryAwareResumePersistencePort()
-        val service = ChatService(
+        val service = createService(
             geminiPort = geminiPort,
             chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = SampleResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = persistencePort,
-                resumeProviderPort = SampleResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
+            resumeProviderPort = SampleResumeProviderPort(),
+            resumePersistencePort = persistencePort
         )
 
         service.streamChatResponse(
@@ -187,6 +122,33 @@ class ChatServiceTest {
         val finalPrompt = geminiPort.lastHistory.last().text
         assertTrue(finalPrompt.startsWith("RAG::"), "Expected RAG prompt for history follow-up, but was: $finalPrompt")
         assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
+    }
+
+    private fun createService(
+        geminiPort: GeminiPort,
+        chatHistoryRepository: ChatHistoryRepository = InMemoryChatHistoryRepository(),
+        resumeProviderPort: ResumeProviderPort = EmptyResumeProviderPort(),
+        resumePersistencePort: ResumePersistencePort = EmptyResumePersistencePort()
+    ): ChatService {
+        val meterRegistry = SimpleMeterRegistry()
+        return ChatService(
+            geminiPort = geminiPort,
+            chatHistoryRepository = chatHistoryRepository,
+            careerContextPlanner = CareerContextPlanner(
+                llmRouter = LLMRouter(
+                    resumeProviderPort = resumeProviderPort,
+                    meterRegistry = meterRegistry
+                ),
+                contextRetriever = ContextRetriever(
+                    resumePersistencePort = resumePersistencePort,
+                    resumeProviderPort = resumeProviderPort,
+                    ownDomainProfileProvider = OwnDomainProfileProvider(),
+                    metadataFilterEnabled = true
+                )
+            ),
+            careerPromptAssembler = CareerPromptAssembler(FakePromptProvider),
+            meterRegistry = meterRegistry
+        )
     }
 
     private class RecordingGeminiPort : GeminiPort {

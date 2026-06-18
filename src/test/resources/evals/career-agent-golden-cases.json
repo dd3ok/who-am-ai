@@ -1,0 +1,20 @@
+[
+  {
+    "id": "recent-activity-after-resignation",
+    "question": "퇴사 이후에는 뭐하고 지내나요?",
+    "requiredPhrases": ["AI 에이전트", "백엔드 시스템 설계", "개인 프로젝트"],
+    "forbiddenPhrases": ["실시간 GitHub", "확인했습니다", "정보가 없습니다"]
+  },
+  {
+    "id": "backend-system-design-learning",
+    "question": "개인 프로젝트로 대용량 트래픽이나 분산환경 문제도 공부했나요?",
+    "requiredPhrases": ["대용량 트래픽", "동시성", "멱등성"],
+    "forbiddenPhrases": ["모릅니다", "정보가 없습니다"]
+  },
+  {
+    "id": "recent-repository-projects",
+    "question": "who-am-ai나 WATCHLIST.md 같은 개인 프로젝트는 어떤 의미가 있나요?",
+    "requiredPhrases": ["who-am-ai", "WATCHLIST.md", "AI 에이전트"],
+    "forbiddenPhrases": ["저장소를 실시간으로 조회", "실시간 GitHub"]
+  }
+]

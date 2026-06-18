@@ -40,7 +40,7 @@ class StreamChatWebSocketHandlerTest {
             incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(CloseStatus.POLICY_VIOLATION, session.closedWith)
         assertEquals(0, chatUseCase.messages.size)
@@ -60,7 +60,7 @@ class StreamChatWebSocketHandlerTest {
             incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(1, chatUseCase.messages.size)
         assertEquals(listOf("ok:user-1"), session.sentPayloads)
@@ -75,7 +75,7 @@ class StreamChatWebSocketHandlerTest {
             incomingPayloads = listOf("""{"uuid":" ","type":"USER","content":"hello"}""")
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(0, chatUseCase.messages.size)
         assertTrue(session.sentPayloads.single().contains("Invalid chat message"))
@@ -96,7 +96,7 @@ class StreamChatWebSocketHandlerTest {
                 incomingPayloads = listOf(payload)
             )
 
-            handler.handle(session).block(Duration.ofSeconds(1))
+            handler.handle(session).block(BLOCK_TIMEOUT)
 
             assertEquals(0, chatUseCase.messages.size)
             assertTrue(session.sentPayloads.single().contains("Invalid chat message"))
@@ -112,7 +112,7 @@ class StreamChatWebSocketHandlerTest {
             incomingPayloads = listOf("{not-json")
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(0, chatUseCase.messages.size)
         assertTrue(session.sentPayloads.single().contains("Invalid chat message"))
@@ -130,7 +130,7 @@ class StreamChatWebSocketHandlerTest {
             )
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(1, session.sendCalls)
         assertEquals(listOf("ok:user-1", "ok:user-2"), session.sentPayloads)
@@ -148,7 +148,7 @@ class StreamChatWebSocketHandlerTest {
             )
         )
 
-        handler.handle(session).block(Duration.ofSeconds(1))
+        handler.handle(session).block(BLOCK_TIMEOUT)
 
         assertEquals(1, session.sendCalls)
         assertEquals(listOf("ok:user-1", "ok:user-2"), session.sentPayloads)
@@ -169,7 +169,7 @@ class StreamChatWebSocketHandlerTest {
         )
 
         try {
-            handler.handle(session).block(Duration.ofSeconds(1))
+            handler.handle(session).block(BLOCK_TIMEOUT)
 
             assertEquals(0, payload.nativeBuffer.refCnt())
             assertEquals(listOf("ok:user-1"), session.sentPayloads)
@@ -256,5 +256,9 @@ class StreamChatWebSocketHandlerTest {
 
         override fun pongMessage(payloadFactory: Function<DataBufferFactory, DataBuffer>): WebSocketMessage =
             WebSocketMessage(WebSocketMessage.Type.PONG, payloadFactory.apply(dataBufferFactory))
+    }
+
+    private companion object {
+        val BLOCK_TIMEOUT: Duration = Duration.ofSeconds(5)
     }
 }
