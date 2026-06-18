@@ -19,27 +19,22 @@ class ResumeChunkingService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     fun generateChunks(resume: Resume): List<ResumeChunk> {
-        return try {
-            val chunks = mutableListOf<ResumeChunk>()
+        val chunks = mutableListOf<ResumeChunk>()
 
-            chunks.add(createSummaryChunk(resume))
-            chunks.add(createSkillsChunk(resume))
-            createRecentActivitiesChunk(resume)?.let { chunks.add(it) }
-            chunks.add(createTotalExperienceChunk(resume))
-            createEducationChunk(resume)?.let { chunks.add(it) }
-            createCertificatesChunk(resume)?.let { chunks.add(it) }
-            createHobbiesChunk(resume)?.let { chunks.add(it) }
-            createInterestsChunk(resume)?.let { chunks.add(it) }
-            createMbtiChunk(resume)?.let { chunks.add(it) }
-            chunks.addAll(createExperienceChunks(resume))
-            chunks.addAll(createProjectChunks(resume))
+        chunks.add(createSummaryChunk(resume))
+        chunks.add(createSkillsChunk(resume))
+        createRecentActivitiesChunk(resume)?.let { chunks.add(it) }
+        chunks.add(createTotalExperienceChunk(resume))
+        createEducationChunk(resume)?.let { chunks.add(it) }
+        createCertificatesChunk(resume)?.let { chunks.add(it) }
+        createHobbiesChunk(resume)?.let { chunks.add(it) }
+        createInterestsChunk(resume)?.let { chunks.add(it) }
+        createMbtiChunk(resume)?.let { chunks.add(it) }
+        chunks.addAll(createExperienceChunks(resume))
+        chunks.addAll(createProjectChunks(resume))
 
-            logger.info("Translated domain object into ${chunks.size} infrastructure DTOs.")
-            chunks
-        } catch (e: Exception) {
-            logger.error("Error during chunk generation: ${e.message}", e)
-            emptyList()
-        }
+        logger.info("Translated domain object into ${chunks.size} infrastructure DTOs.")
+        return chunks
     }
 
     private fun createSummaryChunk(resume: Resume): ResumeChunk {

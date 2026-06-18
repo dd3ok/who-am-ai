@@ -198,9 +198,6 @@ class ChatServiceTest {
         }
 
         override suspend fun generateContent(prompt: String, purpose: String): String = ""
-
-        override suspend fun generateStyledImage(personImageFile: ByteArray, clothingImageFile: ByteArray): ByteArray =
-            ByteArray(0)
     }
 
     private class InMemoryChatHistoryRepository : ChatHistoryRepository {

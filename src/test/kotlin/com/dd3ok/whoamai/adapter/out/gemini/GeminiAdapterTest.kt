@@ -1,7 +1,6 @@
 package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
-import com.dd3ok.whoamai.common.config.GeminiImageModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.collect
@@ -13,9 +12,6 @@ import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
-import org.springframework.ai.image.ImageModel
-import org.springframework.ai.image.ImagePrompt
-import org.springframework.ai.image.ImageResponse
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -232,9 +228,7 @@ class GeminiAdapterTest {
             streamingChatModel = streamingModel,
             chatModel = chatModel,
             chatModelProperties = chatProperties,
-            imageModelProperties = GeminiImageModelProperties(),
-            promptTemplateService = FakePromptProvider,
-            imageModel = NoopImageModel
+            promptTemplateService = FakePromptProvider
         )
     }
 
@@ -267,10 +261,6 @@ class GeminiAdapterTest {
 
     private object NoopChatModel : ChatModel {
         override fun call(prompt: Prompt): ChatResponse = chatResponse("")
-    }
-
-    private object NoopImageModel : ImageModel {
-        override fun call(request: ImagePrompt): ImageResponse = ImageResponse(emptyList())
     }
 
     private object FakePromptProvider : PromptProvider {
