@@ -14,6 +14,7 @@ import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.model.tool.ToolCallingChatOptions
 import org.springframework.ai.tool.annotation.Tool
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
@@ -124,7 +125,9 @@ class GeminiAdapterTest {
 
         adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
 
+        val options = streamingModel.prompts.single().options as ToolCallingChatOptions
         assertEquals(1, toolProvider.callCount)
+        assertEquals(listOf("test_career_tool"), options.toolCallbacks.map { it.toolDefinition.name() })
     }
 
     @Test
