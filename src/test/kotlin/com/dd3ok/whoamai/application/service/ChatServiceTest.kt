@@ -196,8 +196,6 @@ class ChatServiceTest {
             lastHistory = history
             return flowOf("응답")
         }
-
-        override suspend fun generateContent(prompt: String, purpose: String): String = ""
     }
 
     private class InMemoryChatHistoryRepository : ChatHistoryRepository {

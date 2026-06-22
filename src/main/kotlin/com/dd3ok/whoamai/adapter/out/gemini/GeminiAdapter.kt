@@ -4,19 +4,16 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.reactive.asFlow
-import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.messages.Message
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
-import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions
@@ -25,7 +22,6 @@ import org.springframework.stereotype.Component
 @Component
 class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
-    private val chatModel: ChatModel,
     private val chatModelProperties: GeminiChatModelProperties,
     private val promptTemplateService: PromptProvider
 ) : GeminiPort {
@@ -33,38 +29,17 @@ class GeminiAdapter(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private data class ChatPurposeConfig(
-        val systemInstruction: String?,
         val temperature: Double,
-        val maxOutputTokens: Int,
-        val models: List<String>? = null
+        val maxOutputTokens: Int
     )
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
         val config = ChatPurposeConfig(
-            systemInstruction = null,
             temperature = chatModelProperties.temperature.toDouble(),
             maxOutputTokens = chatModelProperties.maxOutputTokens
         )
         return streamWithPriorities(messages, config)
-    }
-
-    override suspend fun generateContent(prompt: String, purpose: String): String = withContext(Dispatchers.IO) {
-        val callConfig = defaultConfig()
-        val messages = mutableListOf<Message>()
-
-        callConfig.systemInstruction?.takeIf { it.isNotBlank() }?.let { messages += SystemMessage(it) }
-        messages += UserMessage(prompt)
-
-        return@withContext callWithPriorities(messages, callConfig)
-    }
-
-    private fun defaultConfig(): ChatPurposeConfig {
-        return ChatPurposeConfig(
-            systemInstruction = promptTemplateService.systemInstruction(),
-            temperature = chatModelProperties.temperature.toDouble(),
-            maxOutputTokens = chatModelProperties.maxOutputTokens
-        )
     }
 
     private fun buildChatOptions(config: ChatPurposeConfig, model: String): GoogleGenAiChatOptions {
@@ -87,7 +62,7 @@ class GeminiAdapter(
         config: ChatPurposeConfig
     ): Flow<String> = channelFlow {
         var lastError: Throwable? = null
-        val models = config.models ?: modelPriority()
+        val models = modelPriority()
 
         for ((idx, model) in models.withIndex()) {
             val options = buildChatOptions(config, model)
@@ -125,44 +100,6 @@ class GeminiAdapter(
         }
 
         lastError?.let { throw it }
-    }
-
-    private suspend fun callWithPriorities(
-        messages: List<Message>,
-        config: ChatPurposeConfig
-    ): String {
-        val models = config.models ?: modelPriority()
-        var lastError: Throwable? = null
-
-        for ((idx, model) in models.withIndex()) {
-            val options = buildChatOptions(config, model)
-
-            try {
-                val response = chatModel.call(Prompt(messages, options))
-                val text = response.results.firstOrNull()?.output?.text.orEmpty().trim()
-                if (text.isNotBlank()) return text
-                if (idx != models.lastIndex) {
-                    logger.warn("Model $model returned an empty response. Trying next model.")
-                    delay(RETRY_BACKOFF_MS)
-                }
-            } catch (e: Throwable) {
-                lastError = e
-                if (!isRateLimitException(e)) {
-                    logger.error("Chat call failed on model $model: ${e.message}", e)
-                    throw e
-                }
-                if (idx != models.lastIndex) {
-                    logger.warn("Rate limit on model $model. Trying next model.")
-                    delay(RETRY_BACKOFF_MS)
-                }
-            }
-        }
-
-        lastError?.let {
-            logger.error("All models exhausted. lastError=${it.message}", it)
-            throw it
-        }
-        throw IllegalStateException("All models returned empty response.")
     }
 
     private fun isRateLimitException(e: Throwable): Boolean {
