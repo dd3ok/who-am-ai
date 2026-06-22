@@ -28,25 +28,16 @@ class GeminiAdapter(
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    private data class ChatPurposeConfig(
-        val temperature: Double,
-        val maxOutputTokens: Int
-    )
-
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
-        val config = ChatPurposeConfig(
-            temperature = chatModelProperties.temperature.toDouble(),
-            maxOutputTokens = chatModelProperties.maxOutputTokens
-        )
-        return streamWithPriorities(messages, config)
+        return streamWithPriorities(messages)
     }
 
-    private fun buildChatOptions(config: ChatPurposeConfig, model: String): GoogleGenAiChatOptions {
+    private fun buildChatOptions(model: String): GoogleGenAiChatOptions {
         return GoogleGenAiChatOptions.builder()
             .model(model)
-            .temperature(config.temperature)
-            .maxOutputTokens(config.maxOutputTokens)
+            .temperature(chatModelProperties.temperature.toDouble())
+            .maxOutputTokens(chatModelProperties.maxOutputTokens)
             .build()
     }
 
@@ -57,15 +48,13 @@ class GeminiAdapter(
         return messages
     }
 
-    private fun streamWithPriorities(
-        messages: List<Message>,
-        config: ChatPurposeConfig
-    ): Flow<String> = channelFlow {
+    private fun streamWithPriorities(messages: List<Message>): Flow<String> = channelFlow {
         var lastError: Throwable? = null
-        val models = modelPriority()
+        val models = modelPriority().takeIf { it.isNotEmpty() }
+            ?: throw IllegalStateException("No models configured in Gemini properties.")
 
         for ((idx, model) in models.withIndex()) {
-            val options = buildChatOptions(config, model)
+            val options = buildChatOptions(model)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
 

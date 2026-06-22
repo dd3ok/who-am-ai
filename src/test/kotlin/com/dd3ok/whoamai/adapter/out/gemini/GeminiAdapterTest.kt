@@ -61,6 +61,42 @@ class GeminiAdapterTest {
     }
 
     @Test
+    fun `streaming propagates non rate limit errors without fallback`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(IllegalStateException("boom")),
+                Flux.just(chatResponse("fallback"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val error = assertFailsWith<IllegalStateException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("boom", error.message)
+        assertEquals(1, streamingModel.callCount)
+    }
+
+    @Test
+    fun `streaming propagates final rate limit after priorities are exhausted`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(RuntimeException("429 first")),
+                Flux.error(RuntimeException("429 final"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val error = assertFailsWith<RuntimeException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("429 final", error.message)
+        assertEquals(2, streamingModel.callCount)
+    }
+
+    @Test
     fun `streaming ignores empty generation responses`() = runTest {
         val streamingModel = RecordingStreamingChatModel(
             listOf(
@@ -94,10 +130,26 @@ class GeminiAdapterTest {
         assertEquals(2, streamingModel.callCount)
     }
 
-    private fun adapter(streamingModel: RecordingStreamingChatModel): GeminiAdapter {
-        val chatProperties = GeminiChatModelProperties().apply {
+    @Test
+    fun `streaming fails fast when no models are configured`() = runTest {
+        val adapter = adapter(
+            streamingModel = RecordingStreamingChatModel(emptyList()),
+            chatProperties = GeminiChatModelProperties()
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("No models configured in Gemini properties.", error.message)
+    }
+
+    private fun adapter(
+        streamingModel: RecordingStreamingChatModel,
+        chatProperties: GeminiChatModelProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")
         }
+    ): GeminiAdapter {
         return GeminiAdapter(
             streamingChatModel = streamingModel,
             chatModelProperties = chatProperties,
