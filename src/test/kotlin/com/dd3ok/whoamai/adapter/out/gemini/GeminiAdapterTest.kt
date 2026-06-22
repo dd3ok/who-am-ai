@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.springframework.ai.chat.messages.AssistantMessage
-import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
@@ -62,6 +61,42 @@ class GeminiAdapterTest {
     }
 
     @Test
+    fun `streaming propagates non rate limit errors without fallback`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(IllegalStateException("boom")),
+                Flux.just(chatResponse("fallback"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val error = assertFailsWith<IllegalStateException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("boom", error.message)
+        assertEquals(1, streamingModel.callCount)
+    }
+
+    @Test
+    fun `streaming propagates final rate limit after priorities are exhausted`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(RuntimeException("429 first")),
+                Flux.error(RuntimeException("429 final"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val error = assertFailsWith<RuntimeException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("429 final", error.message)
+        assertEquals(2, streamingModel.callCount)
+    }
+
+    @Test
     fun `streaming ignores empty generation responses`() = runTest {
         val streamingModel = RecordingStreamingChatModel(
             listOf(
@@ -96,137 +131,27 @@ class GeminiAdapterTest {
     }
 
     @Test
-    fun `non streaming ignores empty generation responses and tries next model`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                ChatResponse(emptyList()),
-                chatResponse("ok")
-            )
-        )
+    fun `streaming fails fast when no models are configured`() = runTest {
         val adapter = adapter(
             streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
-        )
-
-        val response = adapter.generateContent("hello", "test")
-
-        assertEquals("ok", response)
-        assertEquals(2, chatModel.callCount)
-    }
-
-    @Test
-    fun `non streaming fallback is attempted when rate limit happens before response`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                RuntimeException("429 quota exhausted"),
-                chatResponse("fallback")
-            )
-        )
-        val adapter = adapter(
-            streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
-        )
-
-        val response = adapter.generateContent("hello", "test")
-
-        assertEquals("fallback", response)
-        assertEquals(2, chatModel.callCount)
-    }
-
-    @Test
-    fun `non streaming propagates non rate limit errors without fallback`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                IllegalStateException("boom"),
-                chatResponse("fallback")
-            )
-        )
-        val adapter = adapter(
-            streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
+            chatProperties = GeminiChatModelProperties()
         )
 
         val error = assertFailsWith<IllegalStateException> {
-            adapter.generateContent("hello", "test")
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
         }
 
-        assertEquals("boom", error.message)
-        assertEquals(1, chatModel.callCount)
-    }
-
-    @Test
-    fun `non streaming throws final non rate limit error`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                chatResponse(""),
-                RuntimeException("provider unavailable")
-            )
-        )
-        val adapter = adapter(
-            streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
-        )
-
-        val error = assertFailsWith<RuntimeException> {
-            adapter.generateContent("hello", "test")
-        }
-
-        assertEquals("provider unavailable", error.message)
-        assertEquals(2, chatModel.callCount)
-    }
-
-    @Test
-    fun `non streaming throws when all models return empty responses`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                chatResponse(""),
-                ChatResponse(emptyList())
-            )
-        )
-        val adapter = adapter(
-            streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
-        )
-
-        val error = assertFailsWith<IllegalStateException> {
-            adapter.generateContent("hello", "test")
-        }
-
-        assertEquals("All models returned empty response.", error.message)
-        assertEquals(2, chatModel.callCount)
-    }
-
-    @Test
-    fun `non streaming propagates final rate limit after priorities are exhausted`() = runTest {
-        val chatModel = RecordingChatModel(
-            listOf(
-                RuntimeException("429 first"),
-                RuntimeException("429 final")
-            )
-        )
-        val adapter = adapter(
-            streamingModel = RecordingStreamingChatModel(emptyList()),
-            chatModel = chatModel
-        )
-
-        val error = assertFailsWith<RuntimeException> {
-            adapter.generateContent("hello", "test")
-        }
-
-        assertEquals("429 final", error.message)
-        assertEquals(2, chatModel.callCount)
+        assertEquals("No models configured in Gemini properties.", error.message)
     }
 
     private fun adapter(
         streamingModel: RecordingStreamingChatModel,
-        chatModel: ChatModel = NoopChatModel
-    ): GeminiAdapter {
-        val chatProperties = GeminiChatModelProperties().apply {
+        chatProperties: GeminiChatModelProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")
         }
+    ): GeminiAdapter {
         return GeminiAdapter(
             streamingChatModel = streamingModel,
-            chatModel = chatModel,
             chatModelProperties = chatProperties,
             promptTemplateService = FakePromptProvider
         )
@@ -242,25 +167,6 @@ class GeminiAdapterTest {
             callCount += 1
             return response
         }
-    }
-
-    private class RecordingChatModel(
-        private val responses: List<Any>
-    ) : ChatModel {
-        var callCount: Int = 0
-
-        override fun call(prompt: Prompt): ChatResponse {
-            val response = responses.getOrElse(callCount) { chatResponse("") }
-            callCount += 1
-            if (response is Throwable) {
-                throw response
-            }
-            return response as ChatResponse
-        }
-    }
-
-    private object NoopChatModel : ChatModel {
-        override fun call(prompt: Prompt): ChatResponse = chatResponse("")
     }
 
     private object FakePromptProvider : PromptProvider {
