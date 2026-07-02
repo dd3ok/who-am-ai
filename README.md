@@ -20,7 +20,7 @@
 - AI: Spring AI 2.0.0, Google GenAI
 - JSON: Jackson 3
 - 기본 chat 모델: `gemini-3.1-flash-lite`
-- fallback chat 모델: `gemini-3.5-flash`, `gemini-2.5-flash-lite`
+- fallback chat 모델: `gemini-2.5-flash-lite`, `gemini-3.5-flash`, `gemini-2.5-flash`
 - embedding 모델: `gemini-embedding-001`, 768 dimensions
 - 저장소: MongoDB Atlas Vector Search
 - 빌드: Gradle Wrapper
@@ -87,7 +87,7 @@ spring:
         chat:
           model: gemini-3.1-flash-lite
           temperature: 0.75
-          max-output-tokens: 8192
+          max-output-tokens: 4096
         embedding:
           text:
             model: gemini-embedding-001
@@ -101,15 +101,16 @@ spring:
 who-am-ai:
   ai:
     chat:
-      models: [gemini-3.1-flash-lite, gemini-3.5-flash, gemini-2.5-flash-lite]
+      models: [gemini-3.1-flash-lite, gemini-2.5-flash-lite, gemini-3.5-flash, gemini-2.5-flash]
       temperature: 0.75
-      max-output-tokens: 8192
+      max-output-tokens: 4096
+      rate-limit-cooldown-ms: 60000
 ```
 
 배포 환경에서 `application.yml`을 수정하지 않고 fallback 정책을 바꾸려면 Spring Boot 설정 방식으로 주입하면 됩니다.
 
 ```bash
-export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["gemini-3.1-flash-lite","gemini-3.5-flash"],"temperature":0.75,"max-output-tokens":8192}}}}'
+export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["gemini-3.1-flash-lite","gemini-2.5-flash-lite","gemini-3.5-flash","gemini-2.5-flash"],"temperature":0.75,"max-output-tokens":4096,"rate-limit-cooldown-ms":60000}}}}'
 ```
 
 ## MongoDB Atlas Vector Search
@@ -202,12 +203,14 @@ BENCHMARK_MAX_PROMPTS=5 ./scripts/run-threshold-benchmark.sh
 
 ## Gemini 모델과 quota 메모
 
-기본 chat 모델 순서는 비용 효율이 좋은 Gemini 모델을 우선합니다. 다만 모델 제공 여부, 가격, quota는 Google 정책과 프로젝트 사용 등급에 따라 달라질 수 있습니다.
+기본 chat 모델 순서는 quota가 가장 넉넉한 모델을 먼저 쓰고, 안정적인 fallback을 뒤에 둡니다. 한 모델에서 `429`, `quota`, `rate`, `exhausted` 계열 오류가 나면 `rate-limit-cooldown-ms` 동안 그 모델을 건너뛰어 같은 quota 오류를 반복하지 않습니다. 응답 토큰 기본값은 TPM 소모를 줄이기 위해 4096으로 둡니다.
 
-- `gemini-3.1-flash-lite`: 기본 모델입니다. Google AI Studio에서 현재 제공 여부와 quota를 확인하세요.
-- `gemini-3.5-flash`: 더 넓은 처리 용량이 필요할 때 쓰는 fallback 모델입니다.
-- `gemini-2.5-flash-lite`: Gemini 3 endpoint가 제한되거나 rate limit에 걸릴 때를 위한 보수적인 fallback입니다.
+- `gemini-3.1-flash-lite`: 기본 모델입니다. 현재 quota 기준으로 RPM과 RPD가 가장 넉넉해 일반 질의에 우선 사용합니다.
+- `gemini-2.5-flash-lite`: 저비용 fallback입니다. 기본 모델이 일시적으로 막혔을 때 먼저 시도합니다.
+- `gemini-3.5-flash`: 품질을 보강하는 stable fallback입니다. quota가 낮으므로 앞 모델이 실패했을 때만 사용합니다.
+- `gemini-2.5-flash`: stable fallback입니다. 다른 stable 모델까지 제한될 때 마지막으로 사용합니다.
+- `gemini-3-flash-preview`: AI Studio quota가 있다면 직접 fallback 목록 끝에 추가할 수 있습니다. preview 모델이라 기본값에는 넣지 않습니다.
 
-Gemini API rate limit은 API key 단위가 아니라 Google Cloud project 단위로 적용됩니다. 일일 quota는 Pacific time 기준 자정에 초기화됩니다. RPM, TPM, RPD 값은 모델과 프로젝트, 사용 등급에 따라 달라지므로 Google AI Studio에서 현재 값을 확인해야 합니다.
+Gemini API rate limit은 API key 단위가 아니라 Google Cloud project 단위로 적용됩니다. 일일 quota는 Pacific time 기준 자정에 초기화됩니다. RPM, TPM, RPD 값은 모델과 프로젝트, 사용 등급에 따라 달라질 수 있으므로 Google AI Studio에서 현재 값을 확인해야 합니다.
 
 <https://aistudio.google.com/app/usage>

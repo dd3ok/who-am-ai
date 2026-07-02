@@ -16,16 +16,18 @@ class GeminiChatModelPropertiesTest {
         contextRunner
             .withPropertyValues(
                 "who-am-ai.ai.chat.models[0]=gemini-3.1-flash-lite",
-                "who-am-ai.ai.chat.models[1]=gemini-3.5-flash",
+                "who-am-ai.ai.chat.models[1]=gemini-2.5-flash-lite",
                 "who-am-ai.ai.chat.temperature=0.75",
-                "who-am-ai.ai.chat.max-output-tokens=8192"
+                "who-am-ai.ai.chat.max-output-tokens=4096",
+                "who-am-ai.ai.chat.rate-limit-cooldown-ms=45000"
             )
             .run { context ->
                 val properties = context.getBean(GeminiChatModelProperties::class.java)
 
-                assertEquals(listOf("gemini-3.1-flash-lite", "gemini-3.5-flash"), properties.models)
+                assertEquals(listOf("gemini-3.1-flash-lite", "gemini-2.5-flash-lite"), properties.models)
                 assertEquals(0.75f, properties.temperature)
-                assertEquals(8192, properties.maxOutputTokens)
+                assertEquals(4096, properties.maxOutputTokens)
+                assertEquals(45_000L, properties.rateLimitCooldownMs)
             }
     }
 

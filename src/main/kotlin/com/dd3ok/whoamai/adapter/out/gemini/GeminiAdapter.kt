@@ -18,6 +18,8 @@ import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions
 import org.springframework.stereotype.Component
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.max
 
 @Component
 class GeminiAdapter(
@@ -27,6 +29,7 @@ class GeminiAdapter(
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val rateLimitedUntilByModel = ConcurrentHashMap<String, Long>()
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
@@ -50,7 +53,7 @@ class GeminiAdapter(
 
     private fun streamWithPriorities(messages: List<Message>): Flow<String> = channelFlow {
         var lastError: Throwable? = null
-        val models = modelPriority().takeIf { it.isNotEmpty() }
+        val models = availableModels().takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("No models configured in Gemini properties.")
 
         for ((idx, model) in models.withIndex()) {
@@ -80,7 +83,11 @@ class GeminiAdapter(
                 delay(RETRY_BACKOFF_MS)
             } catch (e: Throwable) {
                 lastError = e
-                if (emittedAnyChunk || !isRateLimitException(e) || idx == models.lastIndex) {
+                val rateLimited = isRateLimitException(e)
+                if (rateLimited) {
+                    markRateLimited(model)
+                }
+                if (emittedAnyChunk || !rateLimited || idx == models.lastIndex) {
                     throw e
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
@@ -92,13 +99,68 @@ class GeminiAdapter(
     }
 
     private fun isRateLimitException(e: Throwable): Boolean {
-        val msg = e.message?.lowercase().orEmpty()
-        return msg.contains("429") || msg.contains("quota") || msg.contains("rate") || msg.contains("exhausted")
+        var current: Throwable? = e
+        while (current != null) {
+            val msg = current.message?.lowercase().orEmpty()
+            val rateLimited = msg.contains("429") ||
+                msg.contains("quota") ||
+                msg.contains("rate limit") ||
+                msg.contains("rate-limit") ||
+                msg.contains("too many requests") ||
+                msg.contains("resource_exhausted") ||
+                msg.contains("exhausted")
+
+            if (rateLimited) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
+    }
+
+    private fun availableModels(): List<String> {
+        val models = modelPriority()
+        if (models.isEmpty()) {
+            return emptyList()
+        }
+
+        val now = System.currentTimeMillis()
+        val available = models.filterNot { isCoolingDown(it, now) }
+        if (available.isNotEmpty()) {
+            return available
+        }
+
+        val retryAfterMs = models.mapNotNull(rateLimitedUntilByModel::get).minOrNull()
+            ?.let { max(MIN_RETRY_AFTER_MS, it - now) }
+            ?: chatModelProperties.rateLimitCooldownMs
+        throw IllegalStateException("All Gemini chat models are cooling down after rate limit responses. Retry in about ${retryAfterMs}ms.")
+    }
+
+    private fun isCoolingDown(model: String, now: Long): Boolean {
+        val until = rateLimitedUntilByModel[model] ?: return false
+        if (until <= now) {
+            rateLimitedUntilByModel.remove(model, until)
+            return false
+        }
+        return true
+    }
+
+    private fun markRateLimited(model: String) {
+        val cooldownMs = chatModelProperties.rateLimitCooldownMs
+        if (cooldownMs <= 0L) {
+            return
+        }
+        rateLimitedUntilByModel[model] = System.currentTimeMillis() + cooldownMs
     }
 
     private fun modelPriority(): List<String> {
-        return chatModelProperties.models.takeIf { it.isNotEmpty() }
-            ?: listOfNotNull(chatModelProperties.model.takeIf { it.isNotBlank() })
+        val configuredModels = chatModelProperties.models
+            .orEmpty()
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+
+        return configuredModels.takeIf { it.isNotEmpty() }
+            ?: listOfNotNull(chatModelProperties.model?.trim()?.takeIf { it.isNotBlank() })
     }
 
     private fun toAiMessage(chatMessage: ChatMessage): Message {
@@ -111,5 +173,6 @@ class GeminiAdapter(
 
     companion object {
         private const val RETRY_BACKOFF_MS = 300L
+        private const val MIN_RETRY_AFTER_MS = 1L
     }
 }
