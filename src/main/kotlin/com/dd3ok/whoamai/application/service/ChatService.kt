@@ -3,8 +3,8 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
-import com.dd3ok.whoamai.application.service.agent.CareerContextPlanner
-import com.dd3ok.whoamai.application.service.agent.CareerPromptAssembler
+import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
@@ -39,9 +39,9 @@ class ChatService(
         val pastHistory = createApiHistoryWindow(domainHistory)
 
         val plan = careerContextPlanner.plan(userPrompt, pastHistory)
-        val finalHistory = careerPromptAssembler.assemble(plan)
-        if (plan.useRagPrompt) {
-            if (plan.contexts.isNotEmpty()) {
+        val finalHistory = careerPromptAssembler.assemble(plan.prompt)
+        if (plan.prompt.useRagPrompt) {
+            if (plan.prompt.contexts.isNotEmpty()) {
                 logger.info("Context found. Proceeding with RAG prompt.")
             } else {
                 logger.info("Resume intent detected but context empty. Proceeding with grounded empty-context RAG prompt.")
@@ -51,11 +51,11 @@ class ChatService(
         }
         meterRegistry.counter(
             "whoamai.chat.request.total",
-            "mode", if (plan.useRagPrompt) "rag" else "chat",
-            "retrieval_path", plan.retrievalPath
+            "mode", if (plan.prompt.useRagPrompt) "rag" else "chat",
+            "retrieval_path", plan.retrieval.retrievalPath
         ).increment()
-        meterRegistry.summary("whoamai.rag.context.size").record(plan.contexts.size.toDouble())
-        if (plan.resumeQuestionDetected && plan.contexts.isEmpty()) {
+        meterRegistry.summary("whoamai.rag.context.size").record(plan.prompt.contexts.size.toDouble())
+        if (plan.retrieval.resumeQuestionDetected && plan.prompt.contexts.isEmpty()) {
             meterRegistry.counter("whoamai.rag.empty_context.total").increment()
         }
 

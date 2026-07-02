@@ -5,8 +5,8 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
-import com.dd3ok.whoamai.application.service.agent.CareerContextPlanner
-import com.dd3ok.whoamai.application.service.agent.CareerPromptAssembler
+import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage

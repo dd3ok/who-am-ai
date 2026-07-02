@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.application.service.agent
+package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
@@ -28,10 +28,10 @@ class CareerContextPlannerTest {
             history = emptyList()
         )
 
-        assertTrue(plan.useRagPrompt)
-        assertEquals("rule", plan.retrievalPath)
-        assertEquals(listOf("recent activity context"), plan.contexts)
-        assertTrue(plan.resumeQuestionDetected)
+        assertTrue(plan.prompt.useRagPrompt)
+        assertEquals("rule", plan.retrieval.retrievalPath)
+        assertEquals(listOf("recent activity context"), plan.prompt.contexts)
+        assertTrue(plan.retrieval.resumeQuestionDetected)
     }
 
     private fun plannerWithChunks(chunks: Map<String, String>): CareerContextPlanner {

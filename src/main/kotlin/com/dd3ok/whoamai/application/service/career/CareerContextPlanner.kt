@@ -1,4 +1,4 @@
-package com.dd3ok.whoamai.application.service.agent
+package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.service.ContextRetriever
 import com.dd3ok.whoamai.application.service.LLMRouter
@@ -14,7 +14,7 @@ class CareerContextPlanner(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    suspend fun plan(userPrompt: String, history: List<ChatMessage>): CareerPromptPlan {
+    suspend fun plan(userPrompt: String, history: List<ChatMessage>): CareerContextPlan {
         var contexts = contextRetriever.retrieveByRule(userPrompt)
         var resumeQuestionDetected = contexts.isNotEmpty()
         var retrievalPath = if (contexts.isNotEmpty()) "rule" else "unknown"
@@ -35,13 +35,17 @@ class CareerContextPlanner(
             retrievalPath = "rag_empty"
         }
 
-        return CareerPromptPlan(
-            history = history,
-            userPrompt = userPrompt,
-            contexts = contexts,
-            useRagPrompt = contexts.isNotEmpty() || resumeQuestionDetected,
-            retrievalPath = retrievalPath,
-            resumeQuestionDetected = resumeQuestionDetected
+        return CareerContextPlan(
+            prompt = CareerPromptInput(
+                history = history,
+                userPrompt = userPrompt,
+                contexts = contexts,
+                useRagPrompt = contexts.isNotEmpty() || resumeQuestionDetected
+            ),
+            retrieval = CareerRetrievalSummary(
+                retrievalPath = retrievalPath,
+                resumeQuestionDetected = resumeQuestionDetected
+            )
         )
     }
 }
