@@ -3,8 +3,8 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
-import com.dd3ok.whoamai.application.service.dto.QueryType
-import com.dd3ok.whoamai.common.service.PromptProvider
+import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
@@ -19,9 +19,8 @@ import org.springframework.stereotype.Service
 class ChatService(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
-    private val llmRouter: LLMRouter,
-    private val contextRetriever: ContextRetriever,
-    private val promptTemplateService: PromptProvider,
+    private val careerContextPlanner: CareerContextPlanner,
+    private val careerPromptAssembler: CareerPromptAssembler,
     private val meterRegistry: MeterRegistry
 ) : ChatUseCase {
 
@@ -39,47 +38,24 @@ class ChatService(
         val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
         val pastHistory = createApiHistoryWindow(domainHistory)
 
-        // 1. ContextRetriever를 먼저 호출하여 규칙 기반 검색을 시도
-        var relevantContexts = contextRetriever.retrieveByRule(userPrompt)
-        var resumeQuestionDetected = relevantContexts.isNotEmpty()
-        var retrievalPath = if (relevantContexts.isNotEmpty()) "rule" else "unknown"
-
-        // 2. 규칙 기반으로 컨텍스트를 찾지 못했다면, 그 때 LLM 라우터와 벡터 검색을 사용
-        if (relevantContexts.isEmpty()) {
-            val routeDecision = llmRouter.route(userPrompt, pastHistory)
-            logger.info("No rule match. LLM Router hint: $routeDecision")
-            if (routeDecision.queryType == QueryType.RESUME_RAG) {
-                resumeQuestionDetected = true
-                relevantContexts = contextRetriever.retrieveByVector(userPrompt, routeDecision)
-                retrievalPath = "vector"
-            } else {
-                retrievalPath = "non_rag"
-            }
-        }
-        if (relevantContexts.isEmpty() && resumeQuestionDetected) {
-            retrievalPath = "rag_empty"
-        }
-
-        // 3. 최종적으로 컨텍스트 존재 여부에 따라 프롬프트 결정
-        val useRagPrompt = relevantContexts.isNotEmpty() || resumeQuestionDetected
-        val finalHistory = if (useRagPrompt) {
-            if (relevantContexts.isNotEmpty()) {
+        val plan = careerContextPlanner.plan(userPrompt, pastHistory)
+        val finalHistory = careerPromptAssembler.assemble(plan.prompt)
+        if (plan.prompt.useRagPrompt) {
+            if (plan.prompt.contexts.isNotEmpty()) {
                 logger.info("Context found. Proceeding with RAG prompt.")
             } else {
                 logger.info("Resume intent detected but context empty. Proceeding with grounded empty-context RAG prompt.")
             }
-            createRagPrompt(pastHistory, userPrompt, relevantContexts)
         } else {
             logger.info("No context found. Proceeding with conversational prompt.")
-            createConversationalPrompt(pastHistory, userPrompt)
         }
         meterRegistry.counter(
             "whoamai.chat.request.total",
-            "mode", if (useRagPrompt) "rag" else "chat",
-            "retrieval_path", retrievalPath
+            "mode", if (plan.prompt.useRagPrompt) "rag" else "chat",
+            "retrieval_path", plan.retrieval.retrievalPath
         ).increment()
-        meterRegistry.summary("whoamai.rag.context.size").record(relevantContexts.size.toDouble())
-        if (resumeQuestionDetected && relevantContexts.isEmpty()) {
+        meterRegistry.summary("whoamai.rag.context.size").record(plan.prompt.contexts.size.toDouble())
+        if (plan.retrieval.resumeQuestionDetected && plan.prompt.contexts.isEmpty()) {
             meterRegistry.counter("whoamai.rag.empty_context.total").increment()
         }
 
@@ -107,19 +83,6 @@ class ChatService(
             )
         chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
         logger.info("[SUCCESS] History for user {} saved.", userId)
-    }
-
-    private fun createRagPrompt(history: List<ChatMessage>, userPrompt: String, contexts: List<String>): List<ChatMessage> {
-        val contextString = if (contexts.isNotEmpty()) contexts.joinToString("\n---\n") else "관련 정보 없음"
-        val finalUserPrompt = promptTemplateService.renderRagTemplate(contextString, userPrompt)
-
-        return history + ChatMessage(role = "user", text = finalUserPrompt)
-    }
-
-    private fun createConversationalPrompt(history: List<ChatMessage>, userPrompt: String): List<ChatMessage> {
-        val finalUserPrompt = promptTemplateService.renderConversationalTemplate(userPrompt)
-
-        return history + ChatMessage(role = "user", text = finalUserPrompt)
     }
 
     private fun createApiHistoryWindow(domainHistory: ChatHistory): List<ChatMessage> {
