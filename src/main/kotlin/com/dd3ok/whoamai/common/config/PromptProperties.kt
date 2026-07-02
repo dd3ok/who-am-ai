@@ -13,8 +13,8 @@ data class PromptProperties(
 
 @ConfigurationProperties(prefix = "who-am-ai.ai.chat")
 data class GeminiChatModelProperties(
-    var models: List<String> = emptyList(),
-    var model: String = "",
+    var models: List<String?>? = emptyList(),
+    var model: String? = "",
     var temperature: Float = 0.7f,
     var maxOutputTokens: Int = 4096,
     var rateLimitCooldownMs: Long = 60_000L

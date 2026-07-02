@@ -99,14 +99,23 @@ class GeminiAdapter(
     }
 
     private fun isRateLimitException(e: Throwable): Boolean {
-        val msg = e.message?.lowercase().orEmpty()
-        return msg.contains("429") ||
-            msg.contains("quota") ||
-            msg.contains("rate limit") ||
-            msg.contains("rate-limit") ||
-            msg.contains("too many requests") ||
-            msg.contains("resource_exhausted") ||
-            msg.contains("exhausted")
+        var current: Throwable? = e
+        while (current != null) {
+            val msg = current.message?.lowercase().orEmpty()
+            val rateLimited = msg.contains("429") ||
+                msg.contains("quota") ||
+                msg.contains("rate limit") ||
+                msg.contains("rate-limit") ||
+                msg.contains("too many requests") ||
+                msg.contains("resource_exhausted") ||
+                msg.contains("exhausted")
+
+            if (rateLimited) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
     }
 
     private fun availableModels(): List<String> {
@@ -146,12 +155,12 @@ class GeminiAdapter(
 
     private fun modelPriority(): List<String> {
         val configuredModels = chatModelProperties.models
-            .map(String::trim)
-            .filter(String::isNotBlank)
+            .orEmpty()
+            .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
             .distinct()
 
         return configuredModels.takeIf { it.isNotEmpty() }
-            ?: listOfNotNull(chatModelProperties.model.trim().takeIf { it.isNotBlank() })
+            ?: listOfNotNull(chatModelProperties.model?.trim()?.takeIf { it.isNotBlank() })
     }
 
     private fun toAiMessage(chatMessage: ChatMessage): Message {
