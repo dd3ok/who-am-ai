@@ -11,9 +11,11 @@ import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class GeminiAdapterTest {
 
@@ -61,6 +63,48 @@ class GeminiAdapterTest {
     }
 
     @Test
+    fun `rate limited model is skipped while cooldown is active`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(RuntimeException("429 quota exhausted")),
+                Flux.just(chatResponse("fallback-1")),
+                Flux.just(chatResponse("fallback-2"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val firstChunks = adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        val secondChunks = adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+
+        assertEquals(listOf("fallback-1"), firstChunks)
+        assertEquals(listOf("fallback-2"), secondChunks)
+        assertEquals(listOf("primary", "fallback", "fallback"), streamingModel.requestedModels)
+    }
+
+    @Test
+    fun `streaming fails fast while every model is cooling down`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(RuntimeException("429 primary")),
+                Flux.error(RuntimeException("429 fallback")),
+                Flux.just(chatResponse("unexpected"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val firstError = assertFailsWith<RuntimeException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+        val secondError = assertFailsWith<IllegalStateException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("429 fallback", firstError.message)
+        assertTrue(secondError.message.orEmpty().startsWith("All Gemini chat models are cooling down"))
+        assertEquals(2, streamingModel.callCount)
+    }
+
+    @Test
     fun `streaming propagates non rate limit errors without fallback`() = runTest {
         val streamingModel = RecordingStreamingChatModel(
             listOf(
@@ -75,6 +119,24 @@ class GeminiAdapterTest {
         }
 
         assertEquals("boom", error.message)
+        assertEquals(1, streamingModel.callCount)
+    }
+
+    @Test
+    fun `streaming does not treat generate wording as rate limit`() = runTest {
+        val streamingModel = RecordingStreamingChatModel(
+            listOf(
+                Flux.error(RuntimeException("failed to generate content")),
+                Flux.just(chatResponse("fallback"))
+            )
+        )
+        val adapter = adapter(streamingModel)
+
+        val error = assertFailsWith<RuntimeException> {
+            adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
+        }
+
+        assertEquals("failed to generate content", error.message)
         assertEquals(1, streamingModel.callCount)
     }
 
@@ -161,8 +223,10 @@ class GeminiAdapterTest {
         private val responses: List<Flux<ChatResponse>>
     ) : org.springframework.ai.chat.model.StreamingChatModel {
         var callCount: Int = 0
+        val requestedModels = mutableListOf<String>()
 
         override fun stream(prompt: Prompt): Flux<ChatResponse> {
+            requestedModels += (prompt.options as GoogleGenAiChatOptions).model
             val response = responses.getOrElse(callCount) { Flux.error(IllegalStateException("unexpected call")) }
             callCount += 1
             return response
