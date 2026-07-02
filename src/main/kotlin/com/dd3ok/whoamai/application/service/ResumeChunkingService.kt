@@ -3,8 +3,8 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.adapter.out.persistence.ResumeChunk
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.domain.*
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.convertValue
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.convertValue
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 

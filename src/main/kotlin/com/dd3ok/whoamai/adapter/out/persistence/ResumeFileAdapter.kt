@@ -2,7 +2,7 @@ package com.dd3ok.whoamai.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.port.out.LoadResumePort
 import com.dd3ok.whoamai.domain.Resume
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Component

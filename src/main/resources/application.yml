@@ -13,19 +13,17 @@ spring:
       genai:
         api-key: ${GEMINI_API_KEY}
         chat:
-          options:
-            # Cost-efficient Gemini defaults. Check live availability, pricing, and quota:
-            # https://aistudio.google.com/app/usage
-            models: [gemini-3.1-flash-lite, gemini-3-flash-preview, gemini-2.5-flash-lite]
-            temperature: 0.75
-            max-output-tokens: 8192
+          # Spring AI provider default for auto-configuration.
+          # Runtime fallback order is owned by who-am-ai.ai.chat below.
+          model: gemini-3.1-flash-lite
+          temperature: 0.75
+          max-output-tokens: 8192
         embedding:
           api-key: ${GEMINI_API_KEY}
           text:
-            options:
-              model: gemini-embedding-001
-              dimensions: 768
-              task-type: RETRIEVAL_DOCUMENT
+            model: gemini-embedding-001
+            dimensions: 768
+            task-type: RETRIEVAL_DOCUMENT
     vectorstore:
       mongodb:
         initialize-schema: false
@@ -68,3 +66,13 @@ rag:
   search:
     metadata-filter-enabled: true
     similarity-threshold: 0.65
+
+who-am-ai:
+  ai:
+    chat:
+      # GeminiAdapter uses these values for each request and fallback attempt.
+      # Cost-efficient Gemini defaults. Check live availability, pricing, and quota:
+      # https://aistudio.google.com/app/usage
+      models: [gemini-3.1-flash-lite, gemini-3.5-flash, gemini-2.5-flash-lite]
+      temperature: 0.75
+      max-output-tokens: 8192

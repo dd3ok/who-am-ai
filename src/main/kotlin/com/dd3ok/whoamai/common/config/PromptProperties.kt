@@ -1,9 +1,7 @@
 package com.dd3ok.whoamai.common.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.context.annotation.Configuration
 
-@Configuration
 @ConfigurationProperties(prefix = "prompts")
 data class PromptProperties(
     var systemPath: String = "",
@@ -13,8 +11,7 @@ data class PromptProperties(
     var conversationalTemplatePath: String = ""
 )
 
-@Configuration
-@ConfigurationProperties(prefix = "spring.ai.google.genai.chat.options")
+@ConfigurationProperties(prefix = "who-am-ai.ai.chat")
 data class GeminiChatModelProperties(
     var models: List<String> = emptyList(),
     var model: String = "",
