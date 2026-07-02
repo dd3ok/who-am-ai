@@ -67,7 +67,7 @@ spring:
             task-type: RETRIEVAL_DOCUMENT
 ```
 
-This app keeps its custom chat fallback list under its own namespace so it does not rely on Spring AI accepting non-standard Google GenAI properties:
+This app keeps its custom chat fallback list under its own namespace so it does not rely on Spring AI accepting non-standard Google GenAI properties. Runtime answer generation uses `who-am-ai.ai.chat.*`; `spring.ai.google.genai.chat.model` remains the Spring AI auto-configuration default and should match the first fallback model for clarity.
 
 ```yaml
 who-am-ai:
@@ -78,10 +78,17 @@ who-am-ai:
       max-output-tokens: 8192
 ```
 
+For deployments that need to override the fallback policy without editing `application.yml`, pass the app-owned settings through Spring Boot configuration. For example:
+
+```bash
+export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["gemini-3.1-flash-lite","gemini-3.5-flash"],"temperature":0.75,"max-output-tokens":8192}}}}'
+```
+
 ## Spring AI 2 Compatibility Notes
 
 - The project targets Spring AI 2.0.0, Spring Boot 4.1.0, Spring Framework 7, and Jackson 3.
 - Spring AI Google GenAI chat and embedding options no longer use `spring.ai.google.genai.*.options.*`.
+- Boot 4 uses Jackson 3 runtime APIs under `tools.jackson.*`. Jackson annotations remain under `com.fasterxml.jackson.annotation`, matching the annotation artifact on the runtime classpath.
 - The MongoDB Atlas VectorStore API remains compatible with the existing `add` and `similaritySearch(SearchRequest.builder())` usage.
 - `gemini-embedding-001` remains configured explicitly because the Atlas index is defined for 768-dimensional vectors. Changing embedding models or dimensions requires rebuilding the Atlas vector index and reindexing the resume chunks.
 
@@ -103,7 +110,7 @@ Atlas setup:
 
 ## Run
 
-Use JDK 21. The project has a Gradle toolchain, but `./gradlew` still needs a JDK 21-capable launcher on `PATH` or in `JAVA_HOME`.
+Use JDK 21 to launch Gradle. The project has a Gradle toolchain, but this Gradle/Kotlin setup is validated with `JAVA_HOME` pointing to JDK 21.
 
 ```bash
 ./gradlew bootRun
