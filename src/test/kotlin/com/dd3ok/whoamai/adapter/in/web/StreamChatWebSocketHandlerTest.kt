@@ -3,7 +3,7 @@ package com.dd3ok.whoamai.adapter.`in`.web
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import com.dd3ok.whoamai.domain.StreamMessage
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import io.netty.buffer.PooledByteBufAllocator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow

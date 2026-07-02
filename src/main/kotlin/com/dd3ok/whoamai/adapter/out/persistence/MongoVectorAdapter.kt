@@ -149,7 +149,7 @@ class MongoVectorAdapter(
     }
 
     private val collectionName: String
-        get() = vectorStoreProperties.collectionName.ifBlank { COLLECTION_NAME }
+        get() = vectorStoreProperties.collectionName?.takeIf { it.isNotBlank() } ?: COLLECTION_NAME
 
     private fun inferChunkType(chunkId: String): String = when {
         chunkId.startsWith("project_") -> "project"

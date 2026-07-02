@@ -6,9 +6,9 @@ import com.dd3ok.whoamai.domain.Education
 import com.dd3ok.whoamai.domain.Experience
 import com.dd3ok.whoamai.domain.Period
 import com.dd3ok.whoamai.domain.Resume
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
