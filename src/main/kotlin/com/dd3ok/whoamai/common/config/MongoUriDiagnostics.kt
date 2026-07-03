@@ -9,7 +9,8 @@ import org.springframework.stereotype.Component
 
 @Component
 class MongoUriDiagnostics(
-    @Value("\${spring.data.mongodb.uri:}") private val springMongoUri: String
+    @Value("\${spring.mongodb.uri:}") private val bootMongoUri: String,
+    @Value("\${spring.data.mongodb.uri:}") private val dataMongoUri: String
 ) : ApplicationRunner {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -17,19 +18,28 @@ class MongoUriDiagnostics(
     override fun run(args: ApplicationArguments) {
         val envMongoUri = System.getenv("MONGO_URI").orEmpty()
         val envTarget = MongoUriLogSanitizer.describe(envMongoUri)
-        val springTarget = MongoUriLogSanitizer.describe(springMongoUri)
+        val bootTarget = MongoUriLogSanitizer.describe(bootMongoUri)
+        val dataTarget = MongoUriLogSanitizer.describe(dataMongoUri)
 
         logger.info(
-            "MongoDB URI diagnostics: MONGO_URI present={}, MONGO_URI target={}, spring.data.mongodb.uri present={}, spring.data.mongodb.uri target={}",
+            "MongoDB URI diagnostics: MONGO_URI present={}, MONGO_URI target={}, spring.mongodb.uri present={}, spring.mongodb.uri target={}, spring.data.mongodb.uri present={}, spring.data.mongodb.uri target={}",
             envMongoUri.isNotBlank(),
             envTarget,
-            springMongoUri.isNotBlank(),
-            springTarget
+            bootMongoUri.isNotBlank(),
+            bootTarget,
+            dataMongoUri.isNotBlank(),
+            dataTarget
         )
 
-        if (springMongoUri.isBlank()) {
-            logger.warn("spring.data.mongodb.uri is empty. MongoDB will not use the expected Atlas URI.")
-        } else if (MongoUriLogSanitizer.isLocalhost(springMongoUri)) {
+        if (bootMongoUri.isBlank()) {
+            logger.warn("spring.mongodb.uri is empty. Reactive MongoDB will not use the expected Atlas URI.")
+        } else if (MongoUriLogSanitizer.isLocalhost(bootMongoUri)) {
+            logger.warn("spring.mongodb.uri resolves to localhost. Check Render environment variable injection.")
+        }
+
+        if (dataMongoUri.isBlank()) {
+            logger.warn("spring.data.mongodb.uri is empty. Synchronous MongoTemplate will not use the expected Atlas URI.")
+        } else if (MongoUriLogSanitizer.isLocalhost(dataMongoUri)) {
             logger.warn("spring.data.mongodb.uri resolves to localhost. Check Render environment variable injection.")
         }
     }
