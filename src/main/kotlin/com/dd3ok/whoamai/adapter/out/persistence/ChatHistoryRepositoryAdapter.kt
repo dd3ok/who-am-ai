@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository
 @Repository
 class ChatHistoryRepositoryAdapter(
     private val documentRepository: ChatHistoryDocumentRepository,
-    @Value("\${spring.data.mongodb.uri:}") private val mongoUri: String
+    @Value("\${spring.mongodb.uri:}") private val mongoUri: String
 ) : ChatHistoryRepository {
 
     private val logger = LoggerFactory.getLogger(javaClass)
