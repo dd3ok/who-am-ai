@@ -15,15 +15,21 @@ import com.dd3ok.whoamai.domain.MessageType
 import com.dd3ok.whoamai.domain.Period
 import com.dd3ok.whoamai.domain.Resume
 import com.dd3ok.whoamai.domain.StreamMessage
+import io.micrometer.core.instrument.MockClock
+import io.micrometer.core.instrument.simple.SimpleConfig
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.ai.vectorstore.filter.Filter
-import kotlin.test.assertEquals
+import java.time.Duration
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.test.assertFailsWith
 
 class ChatServiceTest {
 
@@ -95,6 +101,94 @@ class ChatServiceTest {
     }
 
     @Test
+    fun `successful chat request records stage latency metrics`() = runTest {
+        val meterRegistry = SimpleMeterRegistry()
+        val service = createService(
+            geminiPort = RecordingGeminiPort(),
+            meterRegistry = meterRegistry
+        )
+
+        service.streamChatResponse(
+            StreamMessage(uuid = "user-metrics", type = MessageType.USER, content = "안녕")
+        ).toList()
+
+        assertTimerRecorded(meterRegistry, "whoamai.chat.history.load.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.history.save.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.rag.rule.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.first_token.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.total.duration")
+    }
+
+    @Test
+    fun `gemini stream timers start when response flow is collected`() = runTest {
+        val clock = MockClock()
+        val meterRegistry = SimpleMeterRegistry(SimpleConfig.DEFAULT, clock)
+        val service = createService(
+            geminiPort = RecordingGeminiPort(),
+            meterRegistry = meterRegistry
+        )
+
+        val response = service.streamChatResponse(
+            StreamMessage(uuid = "user-cold-flow", type = MessageType.USER, content = "안녕")
+        )
+        clock.add(Duration.ofSeconds(30))
+        response.toList()
+
+        assertEquals(
+            0.0,
+            meterRegistry.find("whoamai.chat.gemini.first_token.duration").timer()
+                ?.totalTime(java.util.concurrent.TimeUnit.SECONDS) ?: -1.0,
+            0.001
+        )
+        assertEquals(
+            0.0,
+            meterRegistry.find("whoamai.chat.gemini.total.duration").timer()
+                ?.totalTime(java.util.concurrent.TimeUnit.SECONDS) ?: -1.0,
+            0.001
+        )
+    }
+
+    @Test
+    fun `cancelled chat stream does not record error metric`() = runTest {
+        val meterRegistry = SimpleMeterRegistry()
+        val chatHistoryRepository = InMemoryChatHistoryRepository()
+        val service = createService(
+            geminiPort = RecordingGeminiPort(),
+            chatHistoryRepository = chatHistoryRepository,
+            meterRegistry = meterRegistry
+        )
+
+        val error = assertFailsWith<CancellationException> {
+            service.streamChatResponse(
+                StreamMessage(uuid = "user-cancel", type = MessageType.USER, content = "안녕")
+            ).collect {
+                throw CancellationException("client disconnected")
+            }
+        }
+
+        assertEquals("client disconnected", error.message)
+        assertEquals(0.0, meterRegistry.find("whoamai.chat.error.total").counter()?.count() ?: 0.0)
+        assertEquals(null, chatHistoryRepository.savedHistory)
+    }
+
+    @Test
+    fun `successful chat request appends to latest history loaded before save`() = runTest {
+        val chatHistoryRepository = HistoryChangesBeforeSecondFindRepository()
+        val service = createService(
+            geminiPort = RecordingGeminiPort(),
+            chatHistoryRepository = chatHistoryRepository
+        )
+
+        service.streamChatResponse(
+            StreamMessage(uuid = "user-history", type = MessageType.USER, content = "안녕")
+        ).toList()
+
+        val savedTexts = chatHistoryRepository.savedHistory?.history?.map { it.text }.orEmpty()
+        assertTrue(savedTexts.contains("다른 탭에서 먼저 저장된 응답"))
+        assertEquals("응답", savedTexts.last())
+    }
+
+    @Test
     fun `follow up question should use history enriched vector retrieval`() = runTest {
         val geminiPort = RecordingGeminiPort()
         val chatHistoryRepository = InMemoryChatHistoryRepository()
@@ -145,9 +239,9 @@ class ChatServiceTest {
         geminiPort: GeminiPort,
         chatHistoryRepository: ChatHistoryRepository = InMemoryChatHistoryRepository(),
         resumeProviderPort: ResumeProviderPort = EmptyResumeProviderPort(),
-        resumePersistencePort: ResumePersistencePort = EmptyResumePersistencePort()
+        resumePersistencePort: ResumePersistencePort = EmptyResumePersistencePort(),
+        meterRegistry: SimpleMeterRegistry = SimpleMeterRegistry()
     ): ChatService {
-        val meterRegistry = SimpleMeterRegistry()
         return ChatService(
             geminiPort = geminiPort,
             chatHistoryRepository = chatHistoryRepository,
@@ -161,7 +255,8 @@ class ChatServiceTest {
                     resumeProviderPort = resumeProviderPort,
                     ownDomainProfileProvider = OwnDomainProfileProvider(),
                     metadataFilterEnabled = true
-                )
+                ),
+                meterRegistry = meterRegistry
             ),
             careerPromptAssembler = CareerPromptAssembler(FakePromptProvider),
             meterRegistry = meterRegistry
@@ -179,15 +274,43 @@ class ChatServiceTest {
 
     private class InMemoryChatHistoryRepository : ChatHistoryRepository {
         private val storage = mutableMapOf<String, ChatHistory>()
+        var findCount: Int = 0
+        var savedHistory: ChatHistory? = null
 
         fun seed(userId: String, history: ChatHistory) {
             storage[userId] = history
         }
 
-        override suspend fun findByUserId(userId: String): ChatHistory? = storage[userId]
+        override suspend fun findByUserId(userId: String): ChatHistory? {
+            findCount += 1
+            return storage[userId]
+        }
 
         override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+            savedHistory = chatHistory
             storage[chatHistory.userId] = chatHistory
+            return chatHistory
+        }
+    }
+
+    private class HistoryChangesBeforeSecondFindRepository : ChatHistoryRepository {
+        var findCount: Int = 0
+        var savedHistory: ChatHistory? = null
+
+        override suspend fun findByUserId(userId: String): ChatHistory? {
+            findCount += 1
+            return if (findCount == 1) {
+                ChatHistory(userId = userId)
+            } else {
+                ChatHistory(
+                    userId = userId,
+                    messages = listOf(ChatMessage(role = "model", text = "다른 탭에서 먼저 저장된 응답"))
+                )
+            }
+        }
+
+        override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+            savedHistory = chatHistory
             return chatHistory
         }
     }
@@ -278,5 +401,9 @@ class ChatServiceTest {
         override fun renderRagTemplate(context: String, question: String): String = "RAG::$question::$context"
 
         override fun renderConversationalTemplate(question: String): String = "CHAT::$question"
+    }
+
+    private fun assertTimerRecorded(meterRegistry: SimpleMeterRegistry, name: String) {
+        assertEquals(1L, meterRegistry.find(name).timer()?.count() ?: 0L, "Expected $name to be recorded")
     }
 }

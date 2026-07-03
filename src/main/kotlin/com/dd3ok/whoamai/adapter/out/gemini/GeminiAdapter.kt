@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -25,7 +26,8 @@ import kotlin.math.max
 class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
     private val chatModelProperties: GeminiChatModelProperties,
-    private val promptTemplateService: PromptProvider
+    private val promptTemplateService: PromptProvider,
+    private val meterRegistry: MeterRegistry
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -57,6 +59,7 @@ class GeminiAdapter(
             ?: throw IllegalStateException("No models configured in Gemini properties.")
 
         for ((idx, model) in models.withIndex()) {
+            recordModelAttempt(model)
             val options = buildChatOptions(model)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
@@ -85,6 +88,7 @@ class GeminiAdapter(
                 lastError = e
                 val rateLimited = isRateLimitException(e)
                 if (rateLimited) {
+                    recordRateLimited(model)
                     markRateLimited(model)
                 }
                 if (emittedAnyChunk || !rateLimited || idx == models.lastIndex) {
@@ -151,6 +155,14 @@ class GeminiAdapter(
             return
         }
         rateLimitedUntilByModel[model] = System.currentTimeMillis() + cooldownMs
+    }
+
+    private fun recordModelAttempt(model: String) {
+        meterRegistry.counter("whoamai.chat.gemini.model_attempt.total", "model", model).increment()
+    }
+
+    private fun recordRateLimited(model: String) {
+        meterRegistry.counter("whoamai.chat.gemini.rate_limited.total", "model", model).increment()
     }
 
     private fun modelPriority(): List<String> {

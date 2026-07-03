@@ -92,6 +92,16 @@ class PromptTemplateService(
     }
 
     private fun replacePlaceholders(template: String, variables: Map<String, String>): String {
+        val unknownPlaceholders = PLACEHOLDER_REGEX.findAll(template)
+            .map { it.groupValues[1] }
+            .toSet()
+            .minus(variables.keys)
+        if (unknownPlaceholders.isNotEmpty()) {
+            throw IllegalStateException(
+                "Unresolved prompt placeholders: ${unknownPlaceholders.sorted().joinToString(", ")}"
+            )
+        }
+
         var result = template
         variables.forEach { (key, value) ->
             result = result.replace("{$key}", value)
@@ -105,5 +115,9 @@ class PromptTemplateService(
         ROUTING_TEMPLATE,
         RAG,
         CONVERSATION
+    }
+
+    private companion object {
+        val PLACEHOLDER_REGEX = Regex("\\{([A-Za-z][A-Za-z0-9_]*)}")
     }
 }

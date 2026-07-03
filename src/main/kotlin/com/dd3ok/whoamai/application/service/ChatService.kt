@@ -9,9 +9,11 @@ import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import kotlin.coroutines.cancellation.CancellationException
@@ -36,7 +38,9 @@ class ChatService(
         val userId = message.uuid
         val userPrompt = message.content
 
-        val domainHistory = loadHistory(userId)
+        val domainHistory = recordSuspendTimer("whoamai.chat.history.load.duration") {
+            loadHistory(userId)
+        }
         val pastHistory = createApiHistoryWindow(domainHistory)
 
         val plan = careerContextPlanner.plan(userPrompt, pastHistory)
@@ -60,30 +64,54 @@ class ChatService(
             meterRegistry.counter("whoamai.rag.empty_context.total").increment()
         }
 
-        // 4. LLM 호출 및 결과 스트리밍
         val modelResponseBuilder = StringBuilder()
+        var firstTokenSample: Timer.Sample? = null
+        var totalSample: Timer.Sample? = null
+        var firstTokenRecorded = false
         return geminiPort.generateChatContent(finalHistory)
-            .onEach { chunk -> modelResponseBuilder.append(chunk) }
+            .onStart {
+                modelResponseBuilder.clear()
+                firstTokenRecorded = false
+                firstTokenSample = Timer.start(meterRegistry)
+                totalSample = Timer.start(meterRegistry)
+            }
+            .onEach { chunk ->
+                if (!firstTokenRecorded) {
+                    firstTokenSample?.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
+                    firstTokenRecorded = true
+                }
+                modelResponseBuilder.append(chunk)
+            }
             .onCompletion { cause ->
+                totalSample?.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
                 if (cause == null) {
                     val fullResponse = modelResponseBuilder.toString()
-                    // 5. 대화 기록 저장
                     saveHistory(userId, userPrompt, fullResponse)
+                } else if (cause is CancellationException) {
+                    logger.info("Chat stream cancelled. History NOT saved.")
                 } else {
+                    meterRegistry.counter(
+                        "whoamai.chat.error.total",
+                        "stage", "gemini",
+                        "exception", cause::class.java.simpleName,
+                        "mode", if (plan.prompt.useRagPrompt) "rag" else "chat"
+                    ).increment()
                     logger.error("Chat stream failed with cause. History NOT saved.", cause)
                 }
             }
     }
 
     private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
-        val currentHistory = loadHistory(userId)
-        val messagesToPersist = currentHistory.history +
-            listOf(
-                ChatMessage(role = "user", text = userPrompt),
-                ChatMessage(role = "model", text = modelResponse)
-            )
         try {
-            chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
+            recordSuspendTimer("whoamai.chat.history.save.duration") {
+                val currentHistory = loadHistory(userId)
+                val messagesToPersist = currentHistory.history +
+                    listOf(
+                        ChatMessage(role = "user", text = userPrompt),
+                        ChatMessage(role = "model", text = modelResponse)
+                    )
+                chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
+            }
             logger.info("[SUCCESS] History for user {} saved.", userId)
         } catch (e: CancellationException) {
             throw e
@@ -100,6 +128,15 @@ class ChatService(
         } catch (e: Exception) {
             logger.warn("Chat history lookup failed. Continuing without prior history for user {}.", userId, e)
             ChatHistory(userId = userId)
+        }
+    }
+
+    private suspend fun <T> recordSuspendTimer(name: String, block: suspend () -> T): T {
+        val sample = Timer.start(meterRegistry)
+        return try {
+            block()
+        } finally {
+            sample.stop(meterRegistry.timer(name))
         }
     }
 

@@ -46,7 +46,8 @@ class CareerContextPlannerTest {
                 resumeProviderPort = resumeProviderPort,
                 ownDomainProfileProvider = OwnDomainProfileProvider(),
                 metadataFilterEnabled = true
-            )
+            ),
+            meterRegistry = SimpleMeterRegistry()
         )
     }
 
