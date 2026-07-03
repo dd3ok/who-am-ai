@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.ai.vectorstore.filter.Filter
+import kotlin.test.assertEquals
 
 class ChatServiceTest {
 
@@ -124,6 +125,22 @@ class ChatServiceTest {
         assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
     }
 
+    @Test
+    fun `chat response continues when chat history storage is unavailable`() = runTest {
+        val geminiPort = RecordingGeminiPort()
+        val service = createService(
+            geminiPort = geminiPort,
+            chatHistoryRepository = FailingChatHistoryRepository()
+        )
+
+        val chunks = service.streamChatResponse(
+            StreamMessage(uuid = "user-history-down", type = MessageType.USER, content = "hello")
+        ).toList()
+
+        assertEquals(1, chunks.size)
+        assertTrue(geminiPort.lastHistory.isNotEmpty())
+    }
+
     private fun createService(
         geminiPort: GeminiPort,
         chatHistoryRepository: ChatHistoryRepository = InMemoryChatHistoryRepository(),
@@ -172,6 +189,16 @@ class ChatServiceTest {
         override suspend fun save(chatHistory: ChatHistory): ChatHistory {
             storage[chatHistory.userId] = chatHistory
             return chatHistory
+        }
+    }
+
+    private class FailingChatHistoryRepository : ChatHistoryRepository {
+        override suspend fun findByUserId(userId: String): ChatHistory? {
+            throw IllegalStateException("history storage unavailable")
+        }
+
+        override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+            throw IllegalStateException("history storage unavailable")
         }
     }
 

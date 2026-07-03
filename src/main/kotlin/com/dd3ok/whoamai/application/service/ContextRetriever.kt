@@ -8,8 +8,10 @@ import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.ai.vectorstore.filter.Filter
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder
 import org.springframework.stereotype.Component
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 작업 목적: 규칙 기반 및 벡터 검색을 통해 사용자 프롬프트에 적합한 이력서 컨텍스트를 조회한다.
@@ -126,7 +128,7 @@ class ContextRetriever(
         val searchKeywords = routeDecision.keywords?.joinToString(" ") ?: ""
         val finalQuery = "$userPrompt $searchKeywords".trim()
 
-        val retrieved = resumePersistencePort.searchSimilarSections(
+        val retrieved = searchSimilarSectionsSafely(
             query = finalQuery,
             topK = retrievalProfile.topK,
             filter = finalFilter,
@@ -217,7 +219,7 @@ class ContextRetriever(
 
     private suspend fun fetchStructuredChunks(chunkIds: List<String>): List<ResumeSearchResult> {
         if (chunkIds.isEmpty()) return emptyList()
-        val contents = resumePersistencePort.findContentsByIds(chunkIds)
+        val contents = findContentsByIdsSafely(chunkIds)
         return chunkIds.mapNotNull { chunkId ->
             contents[chunkId]?.let { content ->
                 ResumeSearchResult(
@@ -231,8 +233,40 @@ class ContextRetriever(
 
     private suspend fun fetchPlainChunks(chunkIds: List<String>): List<String> {
         if (chunkIds.isEmpty()) return emptyList()
-        val contents = resumePersistencePort.findContentsByIds(chunkIds)
+        val contents = findContentsByIdsSafely(chunkIds)
         return chunkIds.mapNotNull(contents::get)
+    }
+
+    private suspend fun findContentsByIdsSafely(chunkIds: List<String>): Map<String, String> {
+        return try {
+            resumePersistencePort.findContentsByIds(chunkIds)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn("Resume chunk lookup failed. Continuing without rule-based RAG context.", e)
+            emptyMap()
+        }
+    }
+
+    private suspend fun searchSimilarSectionsSafely(
+        query: String,
+        topK: Int,
+        filter: Filter.Expression?,
+        similarityThreshold: Double?
+    ): List<ResumeSearchResult> {
+        return try {
+            resumePersistencePort.searchSimilarSections(
+                query = query,
+                topK = topK,
+                filter = filter,
+                similarityThreshold = similarityThreshold
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn("Resume vector search failed. Continuing without vector RAG context.", e)
+            emptyList()
+        }
     }
 
     private fun preferredChunkTypes(query: String, routeDecision: RouteDecision): Map<String, Int> {

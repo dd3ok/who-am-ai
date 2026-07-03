@@ -255,12 +255,25 @@ class ContextRetrieverTest {
         assertEquals(0.58, persistencePort.lastSimilarityThreshold)
     }
 
+    @Test
+    fun `vector retrieval returns empty context when persistence storage is unavailable`() = runTest {
+        persistencePort.failSearch = true
+
+        val result = contextRetriever.retrieveByVector(
+            "hello",
+            RouteDecision(queryType = QueryType.RESUME_RAG)
+        )
+
+        assertTrue(result.isEmpty())
+    }
+
     private class FakeResumePersistencePort : ResumePersistencePort {
         private val contents = mutableMapOf<String, String>()
         var vectorResults: List<ResumeSearchResult> = emptyList()
         var lastFilter: Filter.Expression? = null
         var lastTopK: Int? = null
         var lastSimilarityThreshold: Double? = null
+        var failSearch: Boolean = false
 
         fun stub(id: String, content: String) {
             contents[id] = content
@@ -283,6 +296,9 @@ class ContextRetrieverTest {
             lastFilter = filter
             lastTopK = topK
             lastSimilarityThreshold = similarityThreshold
+            if (failSearch) {
+                throw IllegalStateException("vector storage unavailable")
+            }
             return vectorResults
         }
     }
