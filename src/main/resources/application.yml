@@ -3,9 +3,6 @@ spring:
     name: who-am-ai
   mongodb:
     uri: ${MONGO_URI:}
-  data:
-    mongodb:
-      uri: ${MONGO_URI:}
   ai:
     model:
       chat: google-genai

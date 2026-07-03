@@ -17,7 +17,7 @@ import org.springframework.data.mongodb.core.MongoTemplate
  */
 @Configuration
 class MongoTemplateConfig(
-    @Value("\${spring.data.mongodb.uri:}") private val mongoUri: String
+    @Value("\${spring.mongodb.uri:}") private val mongoUri: String
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -27,7 +27,7 @@ class MongoTemplateConfig(
     @ConditionalOnMissingBean(MongoClient::class)
     fun mongoClient(): MongoClient {
         if (mongoUri.isBlank()) {
-            throw IllegalStateException("spring.data.mongodb.uri 값이 비어 있어 MongoClient를 생성할 수 없습니다.")
+            throw IllegalStateException("spring.mongodb.uri 값이 비어 있어 MongoClient를 생성할 수 없습니다.")
         }
         logger.info("Initializing synchronous MongoClient for Spring AI VectorStore integration.")
         return MongoClients.create(mongoUri)
