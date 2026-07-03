@@ -29,7 +29,7 @@ interface DeepHealthMongoProbe {
 class DefaultDeepHealthService(
     private val resumeProviderPort: ResumeProviderPort,
     private val mongoProbeProvider: ObjectProvider<DeepHealthMongoProbe>,
-    private val vectorStoreProperties: MongoDBAtlasVectorStoreProperties,
+    private val vectorStorePropertiesProvider: ObjectProvider<MongoDBAtlasVectorStoreProperties>,
     @Value("\${spring.mongodb.uri:}") private val mongoUri: String,
     @Value("\${spring.ai.google.genai.api-key:}") private val geminiApiKey: String,
     @Value("\${spring.ai.google.genai.embedding.api-key:}") private val embeddingApiKey: String
@@ -76,7 +76,10 @@ class DefaultDeepHealthService(
         }
         val probe = mongoProbeProvider.ifAvailable
             ?: return DeepHealthComponent(DOWN, "mongo probe is not available")
-        val collectionName = vectorStoreProperties.collectionName?.takeIf { it.isNotBlank() } ?: "resume_chunks"
+        val collectionName = vectorStorePropertiesProvider.ifAvailable
+            ?.collectionName
+            ?.takeIf { it.isNotBlank() }
+            ?: "resume_chunks"
         return try {
             if (probe.collectionExists(collectionName)) {
                 DeepHealthComponent(UP, "collection '$collectionName' exists")
