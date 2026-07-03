@@ -65,7 +65,7 @@ curl -X POST http://localhost:8080/api/admin/resume/reindex \
 실행에 필요한 기본 환경 변수입니다.
 
 ```bash
-export MONGO_URI="mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority"
+export MONGO_URI="mongodb+srv://<user>:<password>@<cluster>/<database>?retryWrites=true&w=majority"
 export GEMINI_API_KEY="<google-genai-key>"
 ```
 
