@@ -42,6 +42,9 @@ logging:
     com.dd3ok.whoamai: debug
 
 management:
+  health:
+    mongodb:
+      enabled: false
   endpoints:
     web:
       exposure:
