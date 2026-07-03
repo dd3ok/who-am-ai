@@ -1,0 +1,23 @@
+[
+  {
+    "question": "who-am-ai github repo?",
+    "expectedPath": "rule",
+    "expectRagPrompt": true,
+    "mustContainAny": ["Spring AI", "MongoDB Atlas"],
+    "mustNotContain": ["CHAT::"]
+  },
+  {
+    "question": "Tell me about gmarket?",
+    "expectedPath": "vector",
+    "expectRagPrompt": true,
+    "mustContainAny": ["Gmarket backend"],
+    "mustNotContain": ["CHAT::"]
+  },
+  {
+    "question": "What is today's weather?",
+    "expectedPath": "non_rag",
+    "expectRagPrompt": false,
+    "mustContainAny": ["CHAT::"],
+    "mustNotContain": ["RAG::"]
+  }
+]

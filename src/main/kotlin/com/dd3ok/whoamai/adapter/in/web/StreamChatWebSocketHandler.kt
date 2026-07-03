@@ -17,6 +17,8 @@ import org.springframework.web.reactive.socket.WebSocketMessage
 import org.springframework.web.reactive.socket.WebSocketSession
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
+import java.time.Duration
+import java.util.concurrent.TimeoutException
 
 @Component
 class StreamChatWebSocketHandler(
@@ -47,19 +49,34 @@ class StreamChatWebSocketHandler(
             val userMessage = parseClientMessage(json)
             validate(userMessage)
             chatUseCase.streamChatResponse(userMessage)
-        }.flatMapMany { responseFlow ->
-            responseFlow
-                .map { aiToken -> session.textMessage(aiToken) }
-                .asFlux()
-        }.onErrorResume { e ->
-            val errorNotice = if (e is InvalidClientMessageException) {
-                INVALID_MESSAGE_ERROR
-            } else {
-                logger.error("Failed to process message from session ${session.id}: ${e.message}", e)
-                TEMPORARY_ERROR
-            }
-            Flux.just(session.textMessage(errorNotice))
         }
+            .flatMapMany { responseFlow ->
+                responseFlow
+                    .map { aiToken -> session.textMessage(aiToken) }
+                    .asFlux()
+            }
+            .timeout(Duration.ofMillis(webSocketProperties.responseTimeoutMs))
+            .onErrorResume { e ->
+                val errorNotice = when (e) {
+                    is InvalidClientMessageException -> errorPayload(
+                        code = "INVALID_MESSAGE",
+                        message = INVALID_MESSAGE_ERROR
+                    )
+                    is TimeoutException -> errorPayload(
+                        code = "MODEL_TIMEOUT",
+                        message = MODEL_TIMEOUT_ERROR,
+                        retryAfterMs = webSocketProperties.responseTimeoutMs
+                    )
+                    else -> {
+                        logger.error("Failed to process message from session ${session.id}: ${e.message}", e)
+                        errorPayload(
+                            code = "TEMPORARY_ERROR",
+                            message = TEMPORARY_ERROR
+                        )
+                    }
+                }
+                Flux.just(session.textMessage(errorNotice))
+            }
     }
 
     private fun parseClientMessage(json: String): StreamMessage {
@@ -83,8 +100,26 @@ class StreamChatWebSocketHandler(
 
     private class InvalidClientMessageException(cause: Throwable? = null) : RuntimeException(cause)
 
+    private fun errorPayload(code: String, message: String, retryAfterMs: Long? = null): String {
+        return objectMapper.writeValueAsString(
+            WebSocketErrorPayload(
+                code = code,
+                message = message,
+                retryAfterMs = retryAfterMs
+            )
+        )
+    }
+
+    private data class WebSocketErrorPayload(
+        val type: MessageType = MessageType.ERROR,
+        val code: String,
+        val message: String,
+        val retryAfterMs: Long? = null
+    )
+
     companion object {
         private const val INVALID_MESSAGE_ERROR = "Invalid chat message."
+        private const val MODEL_TIMEOUT_ERROR = "The response is taking too long. Please try again."
         private const val TEMPORARY_ERROR = "Temporary error. Please try again."
     }
 }

@@ -18,7 +18,7 @@ spring:
           temperature: 0.75
           max-output-tokens: 2048
         embedding:
-          api-key: ${GEMINI_API_KEY}
+          api-key: ${GEMINI_API_KEY:${spring.ai.google.genai.api-key:}}
           text:
             model: gemini-embedding-001
             dimensions: 768
@@ -54,6 +54,7 @@ admin:
 
 websocket:
   allow-null-origin: false
+  response-timeout-ms: 30000
   allowed-origins:
     - https://dd3ok.github.io
     - http://localhost:3000
