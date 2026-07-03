@@ -151,7 +151,7 @@ Docker 이미지는 저장소에 포함된 Gradle Wrapper로 빌드하며, Sprin
 
 ```bash
 docker build -t who-am-ai .
-docker run --rm -p 8080:8080 \
+docker run --rm -p 8080:10000 \
   -e MONGO_URI="$MONGO_URI" \
   -e GEMINI_API_KEY="$GEMINI_API_KEY" \
   -e ADMIN_API_KEY="$ADMIN_API_KEY" \
