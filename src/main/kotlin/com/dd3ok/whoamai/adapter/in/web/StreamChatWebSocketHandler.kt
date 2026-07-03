@@ -82,7 +82,7 @@ class StreamChatWebSocketHandler(
     }
 
     private fun isAllowedOrigin(session: WebSocketSession): Boolean {
-        val origin = session.handshakeInfo.headers.origin ?: return true
+        val origin = session.handshakeInfo.headers.origin ?: return webSocketProperties.allowNullOrigin
         return origin in webSocketProperties.allowedOrigins
     }
 

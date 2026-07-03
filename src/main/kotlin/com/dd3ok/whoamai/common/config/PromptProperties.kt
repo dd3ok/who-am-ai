@@ -19,5 +19,5 @@ data class GeminiChatModelProperties(
     var models: List<String> = emptyList(),
     var model: String = "",
     var temperature: Float = 0.7f,
-    var maxOutputTokens: Int = 8192
+    var maxOutputTokens: Int = 2048
 )

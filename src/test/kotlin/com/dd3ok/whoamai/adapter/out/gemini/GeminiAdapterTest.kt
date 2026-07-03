@@ -6,6 +6,7 @@ import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.model.ChatModel
@@ -17,6 +18,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class GeminiAdapterTest {
+
+    @Test
+    fun `default max output tokens is compact for chat responses`() {
+        assertEquals(2048, GeminiChatModelProperties().maxOutputTokens)
+    }
 
     @Test
     fun `streaming fallback is not attempted after partial output was emitted`() = runTest {
@@ -47,18 +53,22 @@ class GeminiAdapterTest {
 
     @Test
     fun `streaming fallback is attempted when rate limit happens before any output`() = runTest {
+        val meterRegistry = SimpleMeterRegistry()
         val streamingModel = RecordingStreamingChatModel(
             listOf(
                 Flux.error(RuntimeException("429 quota exhausted")),
                 Flux.just(chatResponse("fallback"))
             )
         )
-        val adapter = adapter(streamingModel)
+        val adapter = adapter(streamingModel, meterRegistry = meterRegistry)
 
         val chunks = adapter.generateChatContent(listOf(ChatMessage(role = "user", text = "hello"))).toList()
 
         assertEquals(listOf("fallback"), chunks)
         assertEquals(2, streamingModel.callCount)
+        assertEquals(1.0, counterValue(meterRegistry, "whoamai.chat.gemini.model_attempt.total", "model", "primary"))
+        assertEquals(1.0, counterValue(meterRegistry, "whoamai.chat.gemini.model_attempt.total", "model", "fallback"))
+        assertEquals(1.0, counterValue(meterRegistry, "whoamai.chat.gemini.rate_limited.total", "model", "primary"))
     }
 
     @Test
@@ -219,7 +229,8 @@ class GeminiAdapterTest {
 
     private fun adapter(
         streamingModel: RecordingStreamingChatModel,
-        chatModel: ChatModel = NoopChatModel
+        chatModel: ChatModel = NoopChatModel,
+        meterRegistry: SimpleMeterRegistry = SimpleMeterRegistry()
     ): GeminiAdapter {
         val chatProperties = GeminiChatModelProperties().apply {
             models = listOf("primary", "fallback")
@@ -228,7 +239,8 @@ class GeminiAdapterTest {
             streamingChatModel = streamingModel,
             chatModel = chatModel,
             chatModelProperties = chatProperties,
-            promptTemplateService = FakePromptProvider
+            promptTemplateService = FakePromptProvider,
+            meterRegistry = meterRegistry
         )
     }
 
@@ -280,5 +292,14 @@ class GeminiAdapterTest {
     companion object {
         private fun chatResponse(text: String): ChatResponse =
             ChatResponse(listOf(Generation(AssistantMessage(text))))
+
+        private fun counterValue(
+            meterRegistry: SimpleMeterRegistry,
+            name: String,
+            tagKey: String,
+            tagValue: String
+        ): Double {
+            return meterRegistry.find(name).tag(tagKey, tagValue).counter()?.count() ?: 0.0
+        }
     }
 }

@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
+import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -27,7 +28,8 @@ class GeminiAdapter(
     private val streamingChatModel: StreamingChatModel,
     private val chatModel: ChatModel,
     private val chatModelProperties: GeminiChatModelProperties,
-    private val promptTemplateService: PromptProvider
+    private val promptTemplateService: PromptProvider,
+    private val meterRegistry: MeterRegistry
 ) : GeminiPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -90,6 +92,7 @@ class GeminiAdapter(
         val models = config.models ?: modelPriority()
 
         for ((idx, model) in models.withIndex()) {
+            recordModelAttempt(model)
             val options = buildChatOptions(config, model)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
@@ -116,7 +119,11 @@ class GeminiAdapter(
                 delay(RETRY_BACKOFF_MS)
             } catch (e: Throwable) {
                 lastError = e
-                if (emittedAnyChunk || !isRateLimitException(e) || idx == models.lastIndex) {
+                val rateLimited = isRateLimitException(e)
+                if (rateLimited) {
+                    recordRateLimited(model)
+                }
+                if (emittedAnyChunk || !rateLimited || idx == models.lastIndex) {
                     throw e
                 }
                 logger.warn("Rate limit on model $model. Trying next model.")
@@ -135,6 +142,7 @@ class GeminiAdapter(
         var lastError: Throwable? = null
 
         for ((idx, model) in models.withIndex()) {
+            recordModelAttempt(model)
             val options = buildChatOptions(config, model)
 
             try {
@@ -151,6 +159,7 @@ class GeminiAdapter(
                     logger.error("Chat call failed on model $model: ${e.message}", e)
                     throw e
                 }
+                recordRateLimited(model)
                 if (idx != models.lastIndex) {
                     logger.warn("Rate limit on model $model. Trying next model.")
                     delay(RETRY_BACKOFF_MS)
@@ -168,6 +177,14 @@ class GeminiAdapter(
     private fun isRateLimitException(e: Throwable): Boolean {
         val msg = e.message?.lowercase().orEmpty()
         return msg.contains("429") || msg.contains("quota") || msg.contains("rate") || msg.contains("exhausted")
+    }
+
+    private fun recordModelAttempt(model: String) {
+        meterRegistry.counter("whoamai.chat.gemini.model_attempt.total", "model", model).increment()
+    }
+
+    private fun recordRateLimited(model: String) {
+        meterRegistry.counter("whoamai.chat.gemini.rate_limited.total", "model", model).increment()
     }
 
     private fun modelPriority(): List<String> {

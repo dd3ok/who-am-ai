@@ -67,6 +67,44 @@ class StreamChatWebSocketHandlerTest {
     }
 
     @Test
+    fun `rejects null origin by default before reading chat messages`() {
+        val chatUseCase = RecordingChatUseCase()
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val session = RecordingWebSocketSession(
+            origin = null,
+            incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
+        )
+
+        handler.handle(session).block(Duration.ofSeconds(1))
+
+        assertEquals(CloseStatus.POLICY_VIOLATION, session.closedWith)
+        assertEquals(0, chatUseCase.messages.size)
+        assertEquals(emptyList<String>(), session.sentPayloads)
+    }
+
+    @Test
+    fun `allows null origin only when explicitly configured`() {
+        val chatUseCase = RecordingChatUseCase()
+        val handler = StreamChatWebSocketHandler(
+            chatUseCase = chatUseCase,
+            objectMapper = jacksonObjectMapper(),
+            webSocketProperties = WebSocketProperties(
+                allowedOrigins = listOf("https://preview.example"),
+                allowNullOrigin = true
+            )
+        )
+        val session = RecordingWebSocketSession(
+            origin = null,
+            incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
+        )
+
+        handler.handle(session).block(Duration.ofSeconds(1))
+
+        assertEquals(1, chatUseCase.messages.size)
+        assertEquals(listOf("ok:user-1"), session.sentPayloads)
+    }
+
+    @Test
     fun `rejects blank uuid message without calling chat use case`() {
         val chatUseCase = RecordingChatUseCase()
         val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
