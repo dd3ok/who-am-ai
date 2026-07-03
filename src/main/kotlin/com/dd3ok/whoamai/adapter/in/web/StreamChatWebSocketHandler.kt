@@ -4,13 +4,12 @@ import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import com.dd3ok.whoamai.domain.MessageType
 import com.dd3ok.whoamai.domain.StreamMessage
-import com.fasterxml.jackson.core.JsonProcessingException
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.core.JacksonException
+import tools.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.reactor.asFlux
 import kotlinx.coroutines.reactor.mono
 import org.slf4j.LoggerFactory
-import org.springframework.core.io.buffer.DataBufferUtils
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.socket.CloseStatus
 import org.springframework.web.reactive.socket.WebSocketHandler
@@ -36,11 +35,7 @@ class StreamChatWebSocketHandler(
 
         val outbound = session.receive()
             .concatMap { message ->
-                val json = try {
-                    message.payloadAsText
-                } finally {
-                    DataBufferUtils.release(message.payload)
-                }
+                val json = message.payloadAsText
                 responseMessages(session, json)
             }
 
@@ -70,7 +65,7 @@ class StreamChatWebSocketHandler(
     private fun parseClientMessage(json: String): StreamMessage {
         return try {
             objectMapper.readValue(json, StreamMessage::class.java)
-        } catch (e: JsonProcessingException) {
+        } catch (e: JacksonException) {
             throw InvalidClientMessageException(e)
         }
     }

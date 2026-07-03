@@ -1,7 +1,7 @@
 plugins {
     kotlin("jvm") version "2.3.21"
     kotlin("plugin.spring") version "2.3.21"
-    id("org.springframework.boot") version "3.5.14"
+    id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -24,13 +24,13 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     // Spring AI
-    implementation(platform("org.springframework.ai:spring-ai-bom:1.1.6"))
+    implementation(platform("org.springframework.ai:spring-ai-bom:2.0.0"))
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai-embedding")
     implementation("org.springframework.ai:spring-ai-starter-vector-store-mongodb-atlas")
 
     // Kotlin
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("io.projectreactor.kotlin:reactor-kotlin-extensions")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")

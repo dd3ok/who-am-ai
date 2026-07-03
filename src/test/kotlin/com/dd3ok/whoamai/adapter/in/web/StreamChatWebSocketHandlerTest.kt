@@ -3,7 +3,7 @@ package com.dd3ok.whoamai.adapter.`in`.web
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import com.dd3ok.whoamai.domain.StreamMessage
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import io.netty.buffer.PooledByteBufAllocator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -193,7 +193,7 @@ class StreamChatWebSocketHandlerTest {
     }
 
     @Test
-    fun `releases inbound pooled data buffer after extracting payload`() {
+    fun `does not release inbound pooled data buffer owned by websocket runtime`() {
         val nettyFactory = NettyDataBufferFactory(PooledByteBufAllocator.DEFAULT)
         val nativeBuffer = PooledByteBufAllocator.DEFAULT.buffer()
         nativeBuffer.writeBytes("""{"uuid":"user-1","type":"USER","content":"hello"}""".toByteArray(StandardCharsets.UTF_8))
@@ -209,7 +209,7 @@ class StreamChatWebSocketHandlerTest {
         try {
             handler.handle(session).block(Duration.ofSeconds(1))
 
-            assertEquals(0, payload.nativeBuffer.refCnt())
+            assertEquals(1, payload.nativeBuffer.refCnt())
             assertEquals(listOf("ok:user-1"), session.sentPayloads)
         } finally {
             while (payload.nativeBuffer.refCnt() > 0) {

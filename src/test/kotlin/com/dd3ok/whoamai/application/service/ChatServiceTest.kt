@@ -5,6 +5,8 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
+import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -34,22 +36,7 @@ class ChatServiceTest {
     @Test
     fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-1", type = MessageType.USER, content = "유인재의 백엔드 아키텍처 관련 강점이 뭐야?")
@@ -73,21 +60,9 @@ class ChatServiceTest {
         }
         chatHistoryRepository.seed("user-1", ChatHistory("user-1", existingHistory))
 
-        val service = ChatService(
+        val service = createService(
             geminiPort = geminiPort,
-            chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
+            chatHistoryRepository = chatHistoryRepository
         )
 
         service.streamChatResponse(
@@ -102,22 +77,7 @@ class ChatServiceTest {
     @Test
     fun `declarative chat mentioning resume falls back to conversational prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-2", type = MessageType.USER, content = "어제 어떤 사람 이력서를 봤는데 별로였어")
@@ -130,22 +90,7 @@ class ChatServiceTest {
     @Test
     fun `own service implementation question should use rag prompt`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = ChatService(
-            geminiPort = geminiPort,
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
-        )
+        val service = createService(geminiPort = geminiPort)
 
         service.streamChatResponse(
             StreamMessage(uuid = "user-3", type = MessageType.USER, content = "이 서비스는 어떤 기술로 만들었나요")
@@ -158,20 +103,8 @@ class ChatServiceTest {
     @Test
     fun `successful chat request records stage latency metrics`() = runTest {
         val meterRegistry = SimpleMeterRegistry()
-        val service = ChatService(
+        val service = createService(
             geminiPort = RecordingGeminiPort(),
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
             meterRegistry = meterRegistry
         )
 
@@ -190,20 +123,8 @@ class ChatServiceTest {
     fun `gemini stream timers start when response flow is collected`() = runTest {
         val clock = MockClock()
         val meterRegistry = SimpleMeterRegistry(SimpleConfig.DEFAULT, clock)
-        val service = ChatService(
+        val service = createService(
             geminiPort = RecordingGeminiPort(),
-            chatHistoryRepository = InMemoryChatHistoryRepository(),
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
             meterRegistry = meterRegistry
         )
 
@@ -231,20 +152,9 @@ class ChatServiceTest {
     fun `cancelled chat stream does not record error metric`() = runTest {
         val meterRegistry = SimpleMeterRegistry()
         val chatHistoryRepository = InMemoryChatHistoryRepository()
-        val service = ChatService(
+        val service = createService(
             geminiPort = RecordingGeminiPort(),
             chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
             meterRegistry = meterRegistry
         )
 
@@ -264,21 +174,9 @@ class ChatServiceTest {
     @Test
     fun `successful chat request appends to latest history loaded before save`() = runTest {
         val chatHistoryRepository = HistoryChangesBeforeSecondFindRepository()
-        val service = ChatService(
+        val service = createService(
             geminiPort = RecordingGeminiPort(),
-            chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = EmptyResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = EmptyResumePersistencePort(),
-                resumeProviderPort = EmptyResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
+            chatHistoryRepository = chatHistoryRepository
         )
 
         service.streamChatResponse(
@@ -305,21 +203,11 @@ class ChatServiceTest {
             )
         )
         val persistencePort = HistoryAwareResumePersistencePort()
-        val service = ChatService(
+        val service = createService(
             geminiPort = geminiPort,
             chatHistoryRepository = chatHistoryRepository,
-            llmRouter = LLMRouter(
-                resumeProviderPort = SampleResumeProviderPort(),
-                meterRegistry = SimpleMeterRegistry()
-            ),
-            contextRetriever = ContextRetriever(
-                resumePersistencePort = persistencePort,
-                resumeProviderPort = SampleResumeProviderPort(),
-                ownDomainProfileProvider = OwnDomainProfileProvider(),
-                metadataFilterEnabled = true
-            ),
-            promptTemplateService = FakePromptProvider,
-            meterRegistry = SimpleMeterRegistry()
+            resumeProviderPort = SampleResumeProviderPort(),
+            resumePersistencePort = persistencePort
         )
 
         service.streamChatResponse(
@@ -331,6 +219,50 @@ class ChatServiceTest {
         assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
     }
 
+    @Test
+    fun `chat response continues when chat history storage is unavailable`() = runTest {
+        val geminiPort = RecordingGeminiPort()
+        val service = createService(
+            geminiPort = geminiPort,
+            chatHistoryRepository = FailingChatHistoryRepository()
+        )
+
+        val chunks = service.streamChatResponse(
+            StreamMessage(uuid = "user-history-down", type = MessageType.USER, content = "hello")
+        ).toList()
+
+        assertEquals(1, chunks.size)
+        assertTrue(geminiPort.lastHistory.isNotEmpty())
+    }
+
+    private fun createService(
+        geminiPort: GeminiPort,
+        chatHistoryRepository: ChatHistoryRepository = InMemoryChatHistoryRepository(),
+        resumeProviderPort: ResumeProviderPort = EmptyResumeProviderPort(),
+        resumePersistencePort: ResumePersistencePort = EmptyResumePersistencePort(),
+        meterRegistry: SimpleMeterRegistry = SimpleMeterRegistry()
+    ): ChatService {
+        return ChatService(
+            geminiPort = geminiPort,
+            chatHistoryRepository = chatHistoryRepository,
+            careerContextPlanner = CareerContextPlanner(
+                llmRouter = LLMRouter(
+                    resumeProviderPort = resumeProviderPort,
+                    meterRegistry = meterRegistry
+                ),
+                contextRetriever = ContextRetriever(
+                    resumePersistencePort = resumePersistencePort,
+                    resumeProviderPort = resumeProviderPort,
+                    ownDomainProfileProvider = OwnDomainProfileProvider(),
+                    metadataFilterEnabled = true
+                ),
+                meterRegistry = meterRegistry
+            ),
+            careerPromptAssembler = CareerPromptAssembler(FakePromptProvider),
+            meterRegistry = meterRegistry
+        )
+    }
+
     private class RecordingGeminiPort : GeminiPort {
         var lastHistory: List<ChatMessage> = emptyList()
 
@@ -338,8 +270,6 @@ class ChatServiceTest {
             lastHistory = history
             return flowOf("응답")
         }
-
-        override suspend fun generateContent(prompt: String, purpose: String): String = ""
     }
 
     private class InMemoryChatHistoryRepository : ChatHistoryRepository {
@@ -382,6 +312,16 @@ class ChatServiceTest {
         override suspend fun save(chatHistory: ChatHistory): ChatHistory {
             savedHistory = chatHistory
             return chatHistory
+        }
+    }
+
+    private class FailingChatHistoryRepository : ChatHistoryRepository {
+        override suspend fun findByUserId(userId: String): ChatHistory? {
+            throw IllegalStateException("history storage unavailable")
+        }
+
+        override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+            throw IllegalStateException("history storage unavailable")
         }
     }
 
