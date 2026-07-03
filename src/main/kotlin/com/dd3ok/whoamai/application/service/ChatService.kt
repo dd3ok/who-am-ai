@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import kotlin.coroutines.cancellation.CancellationException
 
 @Service
 class ChatService(
@@ -35,7 +36,7 @@ class ChatService(
         val userId = message.uuid
         val userPrompt = message.content
 
-        val domainHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
+        val domainHistory = loadHistory(userId)
         val pastHistory = createApiHistoryWindow(domainHistory)
 
         val plan = careerContextPlanner.plan(userPrompt, pastHistory)
@@ -75,14 +76,31 @@ class ChatService(
     }
 
     private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
-        val currentHistory = chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
+        val currentHistory = loadHistory(userId)
         val messagesToPersist = currentHistory.history +
             listOf(
                 ChatMessage(role = "user", text = userPrompt),
                 ChatMessage(role = "model", text = modelResponse)
             )
-        chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
-        logger.info("[SUCCESS] History for user {} saved.", userId)
+        try {
+            chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
+            logger.info("[SUCCESS] History for user {} saved.", userId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn("Chat history save failed. Continuing without persistence for user {}.", userId, e)
+        }
+    }
+
+    private suspend fun loadHistory(userId: String): ChatHistory {
+        return try {
+            chatHistoryRepository.findByUserId(userId) ?: ChatHistory(userId = userId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn("Chat history lookup failed. Continuing without prior history for user {}.", userId, e)
+            ChatHistory(userId = userId)
+        }
     }
 
     private fun createApiHistoryWindow(domainHistory: ChatHistory): List<ChatMessage> {
