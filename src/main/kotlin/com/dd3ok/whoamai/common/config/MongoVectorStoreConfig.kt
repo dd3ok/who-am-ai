@@ -40,9 +40,10 @@ class MongoVectorStoreConfig {
         properties.collectionName?.takeIf { it.isNotBlank() }?.let { builder.collectionName(it) }
         properties.pathName?.takeIf { it.isNotBlank() }?.let { builder.pathName(it) }
         properties.indexName?.takeIf { it.isNotBlank() }?.let { builder.vectorIndexName(it) }
-        properties.metadataFieldsToFilter
-            .takeIf { it.isNotEmpty() }
-            ?.let { builder.metadataFieldsToFilter(it) }
+        val metadataFieldsToFilter = properties.metadataFieldsToFilter
+        if (!metadataFieldsToFilter.isNullOrEmpty()) {
+            builder.metadataFieldsToFilter(metadataFieldsToFilter)
+        }
 
         return builder.build()
     }

@@ -17,7 +17,7 @@ import org.springframework.data.mongodb.core.MongoTemplate
  */
 @Configuration
 class MongoTemplateConfig(
-    @Value("\${spring.data.mongodb.uri}") private val mongoUri: String
+    @Value("\${spring.data.mongodb.uri:}") private val mongoUri: String
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
