@@ -13,8 +13,11 @@ import com.dd3ok.whoamai.domain.MessageType
 import com.dd3ok.whoamai.domain.Period
 import com.dd3ok.whoamai.domain.Resume
 import com.dd3ok.whoamai.domain.StreamMessage
+import io.micrometer.core.instrument.MockClock
+import io.micrometer.core.instrument.simple.SimpleConfig
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -22,6 +25,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.ai.vectorstore.filter.Filter
+import java.time.Duration
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.test.assertFailsWith
 
 class ChatServiceTest {
 
@@ -178,6 +184,81 @@ class ChatServiceTest {
         assertTimerRecorded(meterRegistry, "whoamai.chat.rag.rule.duration")
         assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.first_token.duration")
         assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.total.duration")
+    }
+
+    @Test
+    fun `gemini stream timers start when response flow is collected`() = runTest {
+        val clock = MockClock()
+        val meterRegistry = SimpleMeterRegistry(SimpleConfig.DEFAULT, clock)
+        val service = ChatService(
+            geminiPort = RecordingGeminiPort(),
+            chatHistoryRepository = InMemoryChatHistoryRepository(),
+            llmRouter = LLMRouter(
+                resumeProviderPort = EmptyResumeProviderPort(),
+                meterRegistry = SimpleMeterRegistry()
+            ),
+            contextRetriever = ContextRetriever(
+                resumePersistencePort = EmptyResumePersistencePort(),
+                resumeProviderPort = EmptyResumeProviderPort(),
+                ownDomainProfileProvider = OwnDomainProfileProvider(),
+                metadataFilterEnabled = true
+            ),
+            promptTemplateService = FakePromptProvider,
+            meterRegistry = meterRegistry
+        )
+
+        val response = service.streamChatResponse(
+            StreamMessage(uuid = "user-cold-flow", type = MessageType.USER, content = "안녕")
+        )
+        clock.add(Duration.ofSeconds(30))
+        response.toList()
+
+        assertEquals(
+            0.0,
+            meterRegistry.find("whoamai.chat.gemini.first_token.duration").timer()
+                ?.totalTime(java.util.concurrent.TimeUnit.SECONDS) ?: -1.0,
+            0.001
+        )
+        assertEquals(
+            0.0,
+            meterRegistry.find("whoamai.chat.gemini.total.duration").timer()
+                ?.totalTime(java.util.concurrent.TimeUnit.SECONDS) ?: -1.0,
+            0.001
+        )
+    }
+
+    @Test
+    fun `cancelled chat stream does not record error metric`() = runTest {
+        val meterRegistry = SimpleMeterRegistry()
+        val chatHistoryRepository = InMemoryChatHistoryRepository()
+        val service = ChatService(
+            geminiPort = RecordingGeminiPort(),
+            chatHistoryRepository = chatHistoryRepository,
+            llmRouter = LLMRouter(
+                resumeProviderPort = EmptyResumeProviderPort(),
+                meterRegistry = SimpleMeterRegistry()
+            ),
+            contextRetriever = ContextRetriever(
+                resumePersistencePort = EmptyResumePersistencePort(),
+                resumeProviderPort = EmptyResumeProviderPort(),
+                ownDomainProfileProvider = OwnDomainProfileProvider(),
+                metadataFilterEnabled = true
+            ),
+            promptTemplateService = FakePromptProvider,
+            meterRegistry = meterRegistry
+        )
+
+        val error = assertFailsWith<CancellationException> {
+            service.streamChatResponse(
+                StreamMessage(uuid = "user-cancel", type = MessageType.USER, content = "안녕")
+            ).collect {
+                throw CancellationException("client disconnected")
+            }
+        }
+
+        assertEquals("client disconnected", error.message)
+        assertEquals(0.0, meterRegistry.find("whoamai.chat.error.total").counter()?.count() ?: 0.0)
+        assertEquals(null, chatHistoryRepository.savedHistory)
     }
 
     @Test

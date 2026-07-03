@@ -10,9 +10,11 @@ import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
@@ -92,23 +94,31 @@ class ChatService(
 
         // 4. LLM 호출 및 결과 스트리밍
         val modelResponseBuilder = StringBuilder()
-        val firstTokenSample = Timer.start(meterRegistry)
-        val totalSample = Timer.start(meterRegistry)
+        var firstTokenSample: Timer.Sample? = null
+        var totalSample: Timer.Sample? = null
         var firstTokenRecorded = false
         return geminiPort.generateChatContent(finalHistory)
+            .onStart {
+                modelResponseBuilder.clear()
+                firstTokenRecorded = false
+                firstTokenSample = Timer.start(meterRegistry)
+                totalSample = Timer.start(meterRegistry)
+            }
             .onEach { chunk ->
                 if (!firstTokenRecorded) {
-                    firstTokenSample.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
+                    firstTokenSample?.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
                     firstTokenRecorded = true
                 }
                 modelResponseBuilder.append(chunk)
             }
             .onCompletion { cause ->
-                totalSample.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
+                totalSample?.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
                 if (cause == null) {
                     val fullResponse = modelResponseBuilder.toString()
                     // 5. 대화 기록 저장
                     saveHistory(userId, userPrompt, fullResponse)
+                } else if (cause is CancellationException) {
+                    logger.info("Chat stream cancelled. History NOT saved.")
                 } else {
                     meterRegistry.counter(
                         "whoamai.chat.error.total",
