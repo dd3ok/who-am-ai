@@ -189,6 +189,25 @@ class ChatServiceTest {
     }
 
     @Test
+    fun `successful chat request delegates completed exchange to append-only history repository`() = runTest {
+        val chatHistoryRepository = AppendOnlyChatHistoryRepository()
+        val service = createService(
+            geminiPort = RecordingGeminiPort(),
+            chatHistoryRepository = chatHistoryRepository
+        )
+
+        service.streamChatResponse(
+            StreamMessage(uuid = "user-append", type = MessageType.USER, content = "hello")
+        ).toList()
+
+        assertEquals(1, chatHistoryRepository.findCount)
+        assertEquals(
+            listOf("hello", "응답"),
+            chatHistoryRepository.appendedMessages.map { it.text }
+        )
+    }
+
+    @Test
     fun `follow up question should use history enriched vector retrieval`() = runTest {
         val geminiPort = RecordingGeminiPort()
         val chatHistoryRepository = InMemoryChatHistoryRepository()
@@ -312,6 +331,25 @@ class ChatServiceTest {
         override suspend fun save(chatHistory: ChatHistory): ChatHistory {
             savedHistory = chatHistory
             return chatHistory
+        }
+    }
+
+    private class AppendOnlyChatHistoryRepository : ChatHistoryRepository {
+        var findCount: Int = 0
+        val appendedMessages = mutableListOf<ChatMessage>()
+
+        override suspend fun findByUserId(userId: String): ChatHistory? {
+            findCount += 1
+            return ChatHistory(userId = userId)
+        }
+
+        override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+            throw AssertionError("ChatService should append completed exchanges instead of replacing chat history.")
+        }
+
+        override suspend fun appendMessages(userId: String, messages: List<ChatMessage>, maxTokens: Int): ChatHistory {
+            appendedMessages += messages
+            return ChatHistory(userId = userId, messages = appendedMessages)
         }
     }
 

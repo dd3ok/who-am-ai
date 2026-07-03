@@ -62,6 +62,18 @@ class AdminApiKeyFilterTest {
     }
 
     @Test
+    fun `admin deep health request is protected by api key filter`() {
+        val chain = RecordingWebFilterChain()
+        val exchange = post("/api/admin/health/deep")
+        val filter = AdminApiKeyFilter(adminApiKey = "secret")
+
+        filter.filter(exchange, chain).block()
+
+        assertEquals(HttpStatus.UNAUTHORIZED, exchange.response.statusCode)
+        assertFalse(chain.wasCalled)
+    }
+
+    @Test
     fun `non admin request continues filter chain without api key`() {
         val chain = RecordingWebFilterChain()
         val exchange = post("/api/chat")

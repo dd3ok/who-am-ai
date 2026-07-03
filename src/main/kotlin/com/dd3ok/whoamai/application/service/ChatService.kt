@@ -6,6 +6,7 @@ import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
 import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.domain.ChatHistory
+import com.dd3ok.whoamai.domain.ChatHistoryWindow
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.StreamMessage
 import io.micrometer.core.instrument.MeterRegistry
@@ -41,7 +42,7 @@ class ChatService(
         val domainHistory = recordSuspendTimer("whoamai.chat.history.load.duration") {
             loadHistory(userId)
         }
-        val pastHistory = createApiHistoryWindow(domainHistory)
+        val pastHistory = ChatHistoryWindow.recentMessages(domainHistory.history, API_WINDOW_TOKENS)
 
         val plan = careerContextPlanner.plan(userPrompt, pastHistory)
         val finalHistory = careerPromptAssembler.assemble(plan.prompt)
@@ -104,13 +105,14 @@ class ChatService(
     private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
         try {
             recordSuspendTimer("whoamai.chat.history.save.duration") {
-                val currentHistory = loadHistory(userId)
-                val messagesToPersist = currentHistory.history +
-                    listOf(
+                chatHistoryRepository.appendMessages(
+                    userId = userId,
+                    messages = listOf(
                         ChatMessage(role = "user", text = userPrompt),
                         ChatMessage(role = "model", text = modelResponse)
-                    )
-                chatHistoryRepository.save(trimHistoryForPersistence(userId, messagesToPersist))
+                    ),
+                    maxTokens = PERSISTENCE_WINDOW_TOKENS
+                )
             }
             logger.info("[SUCCESS] History for user {} saved.", userId)
         } catch (e: CancellationException) {
@@ -139,36 +141,4 @@ class ChatService(
             sample.stop(meterRegistry.timer(name))
         }
     }
-
-    private fun createApiHistoryWindow(domainHistory: ChatHistory): List<ChatMessage> {
-        var currentTokens = 0
-        val recentMessages = mutableListOf<ChatMessage>()
-        for (msg in domainHistory.history.reversed()) {
-            val estimatedTokens = estimateTokens(msg.text)
-            if (currentTokens + estimatedTokens > API_WINDOW_TOKENS) {
-                break
-            }
-            recentMessages.add(msg)
-            currentTokens += estimatedTokens
-        }
-        recentMessages.reverse()
-        return recentMessages
-    }
-
-    private fun trimHistoryForPersistence(userId: String, messages: List<ChatMessage>): ChatHistory {
-        var currentTokens = 0
-        val recentMessages = mutableListOf<ChatMessage>()
-        for (msg in messages.reversed()) {
-            val estimatedTokens = estimateTokens(msg.text)
-            if (currentTokens + estimatedTokens > PERSISTENCE_WINDOW_TOKENS && recentMessages.isNotEmpty()) {
-                break
-            }
-            recentMessages.add(msg)
-            currentTokens += estimatedTokens
-        }
-        recentMessages.reverse()
-        return ChatHistory(userId = userId, messages = recentMessages)
-    }
-
-    private fun estimateTokens(text: String): Int = (text.length * 1.5).toInt()
 }

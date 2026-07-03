@@ -8,5 +8,6 @@ import org.springframework.data.mongodb.core.mapping.Document
 data class ChatHistoryDocument(
     @Id
     val userId: String,
-    val messages: MutableList<ChatMessage> = mutableListOf()
+    val messages: MutableList<ChatMessage> = mutableListOf(),
+    val revision: Long = 0
 )

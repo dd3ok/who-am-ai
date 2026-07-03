@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import com.dd3ok.whoamai.domain.StreamMessage
 import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import io.netty.buffer.PooledByteBufAllocator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -157,6 +158,50 @@ class StreamChatWebSocketHandlerTest {
     }
 
     @Test
+    fun `delayed first response returns structured timeout error`() {
+        val chatUseCase = DelayedFirstResponseChatUseCase()
+        val objectMapper = jacksonObjectMapper()
+        val handler = StreamChatWebSocketHandler(
+            chatUseCase = chatUseCase,
+            objectMapper = objectMapper,
+            webSocketProperties = WebSocketProperties(responseTimeoutMs = 10)
+        )
+        val session = RecordingWebSocketSession(
+            origin = "https://dd3ok.github.io",
+            incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
+        )
+
+        handler.handle(session).block(Duration.ofSeconds(1))
+
+        val error = objectMapper.readValue<WebSocketErrorPayload>(session.sentPayloads.single())
+        assertEquals("ERROR", error.type)
+        assertEquals("MODEL_TIMEOUT", error.code)
+        assertEquals(10L, error.retryAfterMs)
+    }
+
+    @Test
+    fun `slow response setup returns structured timeout error`() {
+        val chatUseCase = SlowBeforeFlowChatUseCase()
+        val objectMapper = jacksonObjectMapper()
+        val handler = StreamChatWebSocketHandler(
+            chatUseCase = chatUseCase,
+            objectMapper = objectMapper,
+            webSocketProperties = WebSocketProperties(responseTimeoutMs = 10)
+        )
+        val session = RecordingWebSocketSession(
+            origin = "https://dd3ok.github.io",
+            incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
+        )
+
+        handler.handle(session).block(Duration.ofSeconds(1))
+
+        val error = objectMapper.readValue<WebSocketErrorPayload>(session.sentPayloads.single())
+        assertEquals("ERROR", error.type)
+        assertEquals("MODEL_TIMEOUT", error.code)
+        assertEquals(10L, error.retryAfterMs)
+    }
+
+    @Test
     fun `uses a single outbound send stream for multiple client messages`() {
         val chatUseCase = RecordingChatUseCase()
         val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
@@ -235,6 +280,20 @@ class StreamChatWebSocketHandlerTest {
             emit("ok:${message.uuid}")
         }
     }
+
+    private class SlowBeforeFlowChatUseCase : ChatUseCase {
+        override suspend fun streamChatResponse(message: StreamMessage): Flow<String> {
+            delay(50)
+            return flowOf("ok:${message.uuid}")
+        }
+    }
+
+    private data class WebSocketErrorPayload(
+        val type: String,
+        val code: String,
+        val message: String,
+        val retryAfterMs: Long? = null
+    )
 
     private class RecordingWebSocketSession(
         origin: String?,

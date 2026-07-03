@@ -15,7 +15,8 @@ import org.springframework.core.io.ClassPathResource
 @SpringBootTest(
     properties = [
         "spring.mongodb.uri=\${MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
-        "spring.ai.google.genai.api-key=\${GEMINI_API_KEY:test-key}"
+        "spring.ai.google.genai.api-key=\${GEMINI_API_KEY:test-key}",
+        "spring.ai.google.genai.embedding.api-key=\${GEMINI_API_KEY:test-key}"
     ]
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
