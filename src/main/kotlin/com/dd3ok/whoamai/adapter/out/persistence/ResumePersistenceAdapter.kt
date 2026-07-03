@@ -6,6 +6,7 @@ import com.dd3ok.whoamai.application.service.ResumeChunkingService
 import com.dd3ok.whoamai.domain.Resume
 import org.slf4j.LoggerFactory
 import org.springframework.ai.vectorstore.filter.Filter
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Component
 
 /**
@@ -14,11 +15,13 @@ import org.springframework.stereotype.Component
  */
 @Component
 class ResumePersistenceAdapter(
-    private val vectorDBPort: VectorDBPort,
+    private val vectorDBPortProvider: ObjectProvider<VectorDBPort>,
     private val resumeChunkingService: ResumeChunkingService
 ) : ResumePersistencePort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val vectorDBPort: VectorDBPort
+        get() = vectorDBPortProvider.getObject()
 
     override suspend fun index(resume: Resume): Int {
         logger.info("Delegating resume chunking to ResumeChunkingService.")

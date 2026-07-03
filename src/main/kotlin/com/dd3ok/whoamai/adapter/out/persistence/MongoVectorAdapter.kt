@@ -11,6 +11,7 @@ import org.springframework.ai.vectorstore.SearchRequest
 import org.springframework.ai.vectorstore.filter.Filter
 import org.springframework.ai.vectorstore.mongodb.atlas.MongoDBAtlasVectorStore
 import org.springframework.ai.vectorstore.mongodb.autoconfigure.MongoDBAtlasVectorStoreProperties
+import org.springframework.context.annotation.Lazy
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
 import org.springframework.data.mongodb.core.query.Criteria
 import org.springframework.data.mongodb.core.query.Query
@@ -23,6 +24,7 @@ import java.util.UUID
  * 작업 목적: Spring AI MongoDB Atlas VectorStore를 사용해 이력서 Chunk를 색인·검색한다.
  * 주요 로직: Chunk 메타데이터를 VectorStore 문서로 변환해 적재하고, 필터 표현식 기반의 유사도 검색을 수행한다.
  */
+@Lazy
 @Component
 class MongoVectorAdapter(
     private val vectorStore: MongoDBAtlasVectorStore,

@@ -3,7 +3,7 @@ spring:
     name: who-am-ai
   data:
     mongodb:
-      uri: ${MONGO_URI}
+      uri: ${MONGO_URI:}
   ai:
     model:
       chat: google-genai
@@ -33,7 +33,7 @@ spring:
         metadata-fields-to-filter: company,skills
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 logging:
   level:

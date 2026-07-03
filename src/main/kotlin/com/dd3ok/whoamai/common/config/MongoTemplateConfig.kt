@@ -8,20 +8,22 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.annotation.Lazy
 import org.springframework.data.mongodb.core.MongoTemplate
 
 /**
- * 작업 목적: Spring AI VectorStore 자동 구성에서 요구하는 동기식 MongoTemplate Bean을 제공한다.
+ * 작업 목적: Spring AI VectorStore에서 요구하는 동기식 MongoTemplate Bean을 제공한다.
  * 주요 로직: 환경 변수 기반 MongoDB URI를 파싱해 MongoClient/MongoTemplate을 초기화하고, 기존 Reactive 설정과 병행 운용한다.
  */
 @Configuration
 class MongoTemplateConfig(
-    @Value("\${spring.data.mongodb.uri}") private val mongoUri: String
+    @Value("\${spring.data.mongodb.uri:}") private val mongoUri: String
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @Bean
+    @Lazy
     @ConditionalOnMissingBean(MongoClient::class)
     fun mongoClient(): MongoClient {
         if (mongoUri.isBlank()) {
@@ -32,6 +34,7 @@ class MongoTemplateConfig(
     }
 
     @Bean
+    @Lazy
     @ConditionalOnMissingBean(MongoTemplate::class)
     fun mongoTemplate(mongoClient: MongoClient): MongoTemplate {
         val connectionString = ConnectionString(mongoUri)
