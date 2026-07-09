@@ -8,14 +8,14 @@ import java.nio.file.Path
 
 class PromptBrandingTest {
 
-    private val legacyNames = listOf(
+    private val forcedSelfBrandingPhrases = listOf(
         "\uC778\uC7AC AI",
-        "\uC774\uB825\uC11C \uC5D0\uC774\uC804\uD2B8"
+        "\uC774\uB825\uC11C \uC5D0\uC774\uC804\uD2B8",
+        "\uCEE4\uB9AC\uC5B4 \uC5D0\uC774\uC804\uD2B8"
     )
-    private val currentName = "\uCEE4\uB9AC\uC5B4 \uC5D0\uC774\uC804\uD2B8"
 
     @Test
-    fun `prompt resources use career agent branding`() {
+    fun `prompt resources do not force agent self branding`() {
         val promptsPath = Path.of(
             requireNotNull(javaClass.classLoader.getResource("prompts")) {
                 "prompts resource directory not found"
@@ -33,14 +33,9 @@ class PromptBrandingTest {
         assertTrue(promptTexts.isNotEmpty(), "Expected prompt resources to be present")
 
         promptTexts.forEach { (fileName, text) ->
-            legacyNames.forEach { legacyName ->
-                assertFalse(text.contains(legacyName), "Legacy branding remains in $fileName")
+            forcedSelfBrandingPhrases.forEach { phrase ->
+                assertFalse(text.contains(phrase), "Forced self-branding phrase remains in $fileName: $phrase")
             }
-        }
-
-        listOf("system.st", "rag-template.st", "conversational-template.st").forEach { fileName ->
-            val text = promptTexts.first { it.first == fileName }.second
-            assertTrue(text.contains(currentName), "Current branding missing from $fileName")
         }
     }
 }
