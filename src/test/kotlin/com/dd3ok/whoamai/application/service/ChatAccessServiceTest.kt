@@ -15,6 +15,52 @@ import kotlin.test.assertFalse
 
 class ChatAccessServiceTest {
     @Test
+    fun `IP rejected session requests leave the global allowance for other clients`() = runTest {
+        val service = ChatAccessService(fixedWindowStore(), ChatAccessProperties(
+            sessionsPerIpPerMinute = 1, sessionsPerMinute = 3
+        ))
+        service.issueSession("ip-a")
+        repeat(3) {
+            assertEquals("RATE_LIMITED", assertFailsWith<ChatAccessException> { service.issueSession("ip-a") }.code)
+        }
+
+        service.issueSession("ip-b")
+        service.issueSession("ip-c")
+        assertEquals("RATE_LIMITED", assertFailsWith<ChatAccessException> { service.issueSession("ip-d") }.code)
+    }
+
+    @Test
+    fun `IP rejected messages leave the shared allowance for other clients`() = runTest {
+        val store = fixedWindowStore()
+        val properties = ChatAccessProperties(messagesPerIpPerMinute = 1, messagesPerMinute = 2)
+        val first = ChatAccessService(store, properties)
+        val second = ChatAccessService(store, properties)
+        val a = first.issueSession("ip-a")
+        val b = second.issueSession("ip-b")
+        val c = second.issueSession("ip-c")
+        first.authorize(a.conversationId, a.sessionToken, "ip-a")
+        repeat(3) {
+            assertEquals("RATE_LIMITED", assertFailsWith<ChatAccessException> {
+                first.authorize(a.conversationId, null, "ip-a")
+            }.code)
+        }
+
+        second.authorize(b.conversationId, b.sessionToken, "ip-b")
+        assertEquals("RATE_LIMITED", assertFailsWith<ChatAccessException> {
+            second.authorize(c.conversationId, c.sessionToken, "ip-c")
+        }.code)
+    }
+
+    // These scenarios stay within one quota window, even if the wall clock crosses a minute boundary.
+    private fun fixedWindowStore(): ChatAccessStore {
+        val store = InMemoryChatAccessStore()
+        return object : ChatAccessStore by store {
+            override suspend fun incrementRequestCount(key: String, expiresAt: Instant) =
+                store.incrementRequestCount(key.substringBeforeLast(':'), expiresAt)
+        }
+    }
+
+    @Test
     fun `token is hashed at rest and bound to an unexpired conversation`() = runTest {
         val store = InMemoryChatAccessStore()
         val service = ChatAccessService(store, ChatAccessProperties())

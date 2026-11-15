@@ -19,7 +19,11 @@ class LLMRouterTest {
         val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
         val history = listOf(ChatMessage(role = "user", text = "지마켓 경력 알려줘"))
 
-        for (question in listOf("그래서 성과는?", "왜 그렇게 했어?")) {
+        for (question in listOf(
+            "그래서 성과는?", "왜 그렇게 했어?", "그럼 성과는?", "그래서 역할은?",
+            "그럼 그 회사에서 사용한 기술은?", "그래서, 그럼 결과는?",
+            "그럼 성과를 알려줘", "그래서 어떤 결과가 나왔어?", "그럼 역할이 뭐였어?"
+        )) {
             val decision = router.route(question, history)
             assertEquals(QueryType.RESUME_RAG, decision.queryType, question)
             assertEquals("지마켓", decision.company, question)
@@ -33,6 +37,38 @@ class LLMRouterTest {
 
         assertEquals(null, router.route("학력 알려줘", history).company)
         assertEquals(QueryType.NON_RAG, router.route("당근은 어떤 기술을 쓰나요", history).queryType)
+    }
+
+    @Test
+    fun `transition words do not attach unrelated questions to the previous company`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val history = listOf(ChatMessage(role = "user", text = "지마켓 경력 알려줘"))
+        for (question in listOf(
+            "그럼 오늘 날씨 알려줘", "그래서 내일 날씨는?", "그럼 점심 메뉴 추천해줘",
+            "그럼 보안 어떻게 공부해?", "그럼 당근은 Spring Boot를 사용하나요?",
+            "그럼 성과 보고서는 어떻게 작성해?"
+        )) {
+            assertEquals(question, router.resolveQuery(question, history), question)
+            val decision = router.route(question, history)
+            assertEquals(QueryType.NON_RAG, decision.queryType, question)
+            assertEquals(null, decision.company, question)
+            assertEquals(null, decision.project, question)
+        }
+        assertEquals(null, router.route("그럼 학력 알려줘", history).company)
+    }
+
+    @Test
+    fun `a topic switch with a transition word also ends later follow up inheritance`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val history = listOf(
+            ChatMessage("user", "지마켓 경력 알려줘"),
+            ChatMessage("model", "이전 회사 답변"),
+            ChatMessage("user", "그럼 오늘 날씨 알려줘"),
+            ChatMessage("model", "이전 일반 답변")
+        )
+        val question = "더 자세히 알려줘"
+        assertEquals(question, router.resolveQuery(question, history))
+        assertEquals(QueryType.NON_RAG, router.route(question, history).queryType)
     }
 
     private val resume = Resume(

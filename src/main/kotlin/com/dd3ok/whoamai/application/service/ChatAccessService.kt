@@ -21,8 +21,8 @@ class ChatAccessService(
 
     suspend fun issueSession(clientIp: String): ChatSessionGrant {
         val now = Instant.now()
-        consume("sessions:global", properties.sessionsPerMinute, now)
         consume("sessions:ip:${hash(clientIp)}", properties.sessionsPerIpPerMinute, now)
+        consume("sessions:global", properties.sessionsPerMinute, now)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
         val session = ChatSession(UUID.randomUUID().toString(), now.plusSeconds(properties.sessionLifetimeSeconds))
         store.createSession(hash(token), session)
@@ -31,9 +31,9 @@ class ChatAccessService(
 
     suspend fun authorize(conversationId: String, token: String?, clientIp: String) {
         val now = Instant.now()
-        // Count failed authentication too; opening another connection must not reset the budget.
-        consume("messages:global", properties.messagesPerMinute, now)
+        // Count failed authentication too, but reject throttled IPs before charging the shared budget.
         consume("messages:ip:${hash(clientIp)}", properties.messagesPerIpPerMinute, now)
+        consume("messages:global", properties.messagesPerMinute, now)
         if (token == null || !TOKEN_PATTERN.matches(token)) throw ChatAccessException("SESSION_REQUIRED")
         val session = store.findSession(hash(token))
         if (session == null || session.conversationId != conversationId || !session.expiresAt.isAfter(now)) {

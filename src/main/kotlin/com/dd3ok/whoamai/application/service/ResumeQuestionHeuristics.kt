@@ -116,7 +116,9 @@ private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
 }
 
 internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String>): Boolean {
-    val trimmed = rawPrompt.trim()
+    val trimmed = stripConversationTransition(rawPrompt)
+    // References such as "결과는?" do not name a new external subject.
+    if (isFollowUpQuestion(trimmed)) return false
     val match = Regex("^([\\p{L}\\p{Nd}\\-+.]+?)(은|는|이|가)").find(trimmed) ?: return false
     val subject = normalizeResumeQuery(match.groupValues[1])
         .removeSuffix(normalizeResumeQuery("님"))
@@ -133,12 +135,17 @@ internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<Strin
 }
 
 internal fun isFollowUpQuestion(prompt: String): Boolean {
-    val normalized = normalizeResumeQuery(prompt)
+    // A transition word alone does not refer back to the previous project or company.
+    val normalized = normalizeResumeQuery(stripConversationTransition(prompt))
     return listOf(
-        "그래서", "그럼", "거기", "그프로젝트", "그회사", "그때", "그중", "왜그렇게", "왜그걸",
-        "더자세", "조금더", "자세히", "성과는", "역할은", "결과는", "이유는"
-    ).any { normalized.startsWith(it) }
+        "거기", "그프로젝트", "그회사", "그때", "그중", "왜그렇게", "왜그걸",
+        "더자세", "조금더", "자세히"
+    ).any { normalized.startsWith(it) } ||
+        Regex("^(?:어떤|무슨)?(?:성과|역할|결과|이유)(?:은|는|이|가|을|를|도|$)").containsMatchIn(normalized)
 }
+
+private fun stripConversationTransition(prompt: String): String =
+    prompt.trim().replace(Regex("^(?:(?:그래서|그럼)[\\s,，]*)+"), "")
 
 private val DIRECT_TARGET_TOKENS = listOf(
     "너", "넌", "너의", "니", "니가", "당신"
