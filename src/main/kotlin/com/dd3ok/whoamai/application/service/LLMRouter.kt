@@ -56,11 +56,16 @@ class LLMRouter(
 
     /** Resolve short follow-ups before either rule retrieval or routing. Only user turns establish a topic. */
     fun resolveQuery(userPrompt: String, history: List<ChatMessage>): String {
-        if (!isFollowUpQuestion(userPrompt)) return userPrompt
+        val normalized = normalizeResumeQuery(userPrompt)
+        // A substantial excerpt of a recent assistant answer is a reference to verify,
+        // never evidence of a new visitor experience or a new portfolio fact.
+        val quotedAnswer = normalized.length >= 24 && history.takeLast(12).any {
+            it.role in setOf("model", "assistant") && normalizeResumeQuery(it.text).contains(normalized)
+        }
+        if (!quotedAnswer && !isFollowUpQuestion(userPrompt)) return userPrompt
         val resume = resumeProviderPort.getResume()
         val names = NameFragmentExtractor.extract(resume.name)
-        val normalized = normalizeResumeQuery(userPrompt)
-        if (hasExternalNamedSubject(userPrompt, names) ||
+        if ((!quotedAnswer && hasExternalNamedSubject(userPrompt, names)) ||
             NameFragmentExtractor.matches(normalized, names) ||
             explicitTopics(normalized, resume).isNotEmpty()
         ) return userPrompt
@@ -68,7 +73,7 @@ class LLMRouter(
         for (message in history.asReversed().filter { it.role == "user" }.take(6)) {
             val previous = normalizeResumeQuery(message.text)
             val topics = explicitTopics(previous, resume)
-            if (topics.isEmpty() && isFollowUpQuestion(message.text)) continue
+            if (topics.isEmpty() && isFollowUpQuestion(message.text) && !hasExternalNamedSubject(message.text, names)) continue
             // A topic switch ends the chain; never resurrect an older company from unrelated conversation.
             if (!isLikelyOwnDomainQuestion(message.text, previous, resume, names)) return userPrompt
             val target = topics.singleOrNull() ?: resume.name

@@ -63,17 +63,23 @@ class ChatServiceTest {
     }
 
     @Test
-    fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
+    fun `resume intent without evidence cannot invoke a model or reuse an invented history claim`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = createService(geminiPort = geminiPort)
+        val repository = InMemoryChatHistoryRepository()
+        repository.seed("user-1", ChatHistory("user-1", listOf(
+            ChatMessage("user", "유인재의 경력 알려줘"),
+            ChatMessage("model", "존재하지 않는 대용량 시스템을 구축했습니다.")
+        )))
+        val service = createService(geminiPort = geminiPort, chatHistoryRepository = repository)
 
-        service.streamChatResponse(
+        val answer = service.streamChatResponse(
             StreamMessage(uuid = "user-1", type = MessageType.USER, content = "유인재의 백엔드 아키텍처 관련 강점이 뭐야?")
-        ).toList()
+        ).toList().joinToString("")
 
-        val finalPrompt = geminiPort.lastHistory.last().text
-        assertTrue(finalPrompt.startsWith("RAG::"), "Expected grounded RAG prompt fallback, but was: $finalPrompt")
-        assertTrue(finalPrompt.contains("관련 정보 없음"), "Expected empty context marker, but was: $finalPrompt")
+        assertTrue(geminiPort.lastHistory.isEmpty(), "Missing evidence must not reach the model")
+        assertTrue(answer.contains("확인 가능한 경력 자료"))
+        assertTrue(!answer.contains("대용량 시스템"))
+        assertEquals(answer, repository.findByUserId("user-1")!!.history.last().text)
     }
 
     @Test
