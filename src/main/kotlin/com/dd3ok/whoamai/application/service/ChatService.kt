@@ -3,21 +3,24 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
-import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
-import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatHistoryWindow
+import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
+import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.domain.ChatMessage
+import com.dd3ok.whoamai.domain.ChatEvent
+import com.dd3ok.whoamai.domain.ChatEventType
+import com.dd3ok.whoamai.domain.ChatSource
 import com.dd3ok.whoamai.domain.StreamMessage
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.mapNotNull
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
-import kotlin.coroutines.cancellation.CancellationException
 
 @Service
 class ChatService(
@@ -35,90 +38,95 @@ class ChatService(
         const val PERSISTENCE_WINDOW_TOKENS = 8192
     }
 
-    override suspend fun streamChatResponse(message: StreamMessage): Flow<String> {
+    override suspend fun streamChatResponse(message: StreamMessage): Flow<String> =
+        chatEvents(message, requirePersistence = false).mapNotNull { if (it.type == ChatEventType.DELTA) it.content else null }
+
+    override suspend fun streamChatEvents(message: StreamMessage): Flow<ChatEvent> =
+        chatEvents(message, requirePersistence = true)
+
+    private fun chatEvents(message: StreamMessage, requirePersistence: Boolean): Flow<ChatEvent> = flow {
         val userId = message.uuid
         val userPrompt = message.content
+        val requestSample = Timer.start(meterRegistry)
+        val firstTokenSample = Timer.start(meterRegistry)
+        var stage = "history_load"
+        var mode = "unknown"
 
-        val domainHistory = recordSuspendTimer("whoamai.chat.history.load.duration") {
-            loadHistory(userId)
-        }
-        val pastHistory = ChatHistoryWindow.recentMessages(domainHistory.history, API_WINDOW_TOKENS)
-
-        val plan = careerContextPlanner.plan(userPrompt, pastHistory)
-        val finalHistory = careerPromptAssembler.assemble(plan.prompt)
-        if (plan.prompt.useRagPrompt) {
-            if (plan.prompt.contexts.isNotEmpty()) {
-                logger.info("Context found. Proceeding with RAG prompt.")
-            } else {
-                logger.info("Resume intent detected but context empty. Proceeding with grounded empty-context RAG prompt.")
-            }
-        } else {
-            logger.info("No context found. Proceeding with conversational prompt.")
-        }
-        meterRegistry.counter(
-            "whoamai.chat.request.total",
-            "mode", if (plan.prompt.useRagPrompt) "rag" else "chat",
-            "retrieval_path", plan.retrieval.retrievalPath
-        ).increment()
-        meterRegistry.summary("whoamai.rag.context.size").record(plan.prompt.contexts.size.toDouble())
-        if (plan.retrieval.resumeQuestionDetected && plan.prompt.contexts.isEmpty()) {
-            meterRegistry.counter("whoamai.rag.empty_context.total").increment()
-        }
-
-        val modelResponseBuilder = StringBuilder()
-        var firstTokenSample: Timer.Sample? = null
-        var totalSample: Timer.Sample? = null
-        var firstTokenRecorded = false
-        return geminiPort.generateChatContent(finalHistory)
-            .onStart {
-                modelResponseBuilder.clear()
-                firstTokenRecorded = false
-                firstTokenSample = Timer.start(meterRegistry)
-                totalSample = Timer.start(meterRegistry)
-            }
-            .onEach { chunk ->
-                if (!firstTokenRecorded) {
-                    firstTokenSample?.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
-                    firstTokenRecorded = true
-                }
-                modelResponseBuilder.append(chunk)
-            }
-            .onCompletion { cause ->
-                totalSample?.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
-                if (cause == null) {
-                    val fullResponse = modelResponseBuilder.toString()
-                    saveHistory(userId, userPrompt, fullResponse)
-                } else if (cause is CancellationException) {
-                    logger.info("Chat stream cancelled. History NOT saved.")
-                } else {
-                    meterRegistry.counter(
-                        "whoamai.chat.error.total",
-                        "stage", "gemini",
-                        "exception", cause::class.java.simpleName,
-                        "mode", if (plan.prompt.useRagPrompt) "rag" else "chat"
-                    ).increment()
-                    logger.error("Chat stream failed with cause. History NOT saved.", cause)
-                }
-            }
-    }
-
-    private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
         try {
-            recordSuspendTimer("whoamai.chat.history.save.duration") {
-                chatHistoryRepository.appendMessages(
-                    userId = userId,
-                    messages = listOf(
-                        ChatMessage(role = "user", text = userPrompt),
-                        ChatMessage(role = "model", text = modelResponse)
-                    ),
-                    maxTokens = PERSISTENCE_WINDOW_TOKENS
-                )
+            val domainHistory = recordSuspendTimer("whoamai.chat.history.load.duration") {
+                loadHistory(userId)
             }
-            logger.info("[SUCCESS] History for user {} saved.", userId)
+            val pastHistory = ChatHistoryWindow.recentMessages(domainHistory.history, API_WINDOW_TOKENS)
+            stage = "retrieval"
+            val plan = careerContextPlanner.plan(userPrompt, pastHistory)
+            val finalHistory = careerPromptAssembler.assemble(plan.prompt)
+            mode = if (plan.prompt.useRagPrompt) "rag" else "chat"
+            meterRegistry.counter(
+                "whoamai.chat.request.total", "mode", mode,
+                "retrieval_path", plan.retrieval.retrievalPath
+            ).increment()
+            meterRegistry.summary("whoamai.rag.context.size").record(plan.prompt.contexts.size.toDouble())
+            if (plan.retrieval.resumeQuestionDetected && plan.prompt.contexts.isEmpty()) {
+                meterRegistry.counter("whoamai.rag.empty_context.total").increment()
+            }
+
+            emit(ChatEvent(ChatEventType.SOURCES, sources = plan.prompt.sources.map {
+                ChatSource(it.chunkId, it.title, it.url)
+            }))
+
+            // 4. LLM 호출 및 결과 스트리밍
+            stage = "gemini"
+            val modelResponseBuilder = StringBuilder()
+            val modelFirstTokenSample = Timer.start(meterRegistry)
+            val modelTotalSample = Timer.start(meterRegistry)
+            var firstTokenRecorded = false
+            try {
+                geminiPort.generateChatContent(finalHistory).collect { chunk ->
+                    if (!firstTokenRecorded) {
+                        modelFirstTokenSample.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
+                        firstTokenSample.stop(meterRegistry.timer("whoamai.chat.first_token.duration"))
+                        firstTokenRecorded = true
+                    }
+                    modelResponseBuilder.append(chunk)
+                    emit(ChatEvent(ChatEventType.DELTA, content = chunk))
+                }
+            } finally {
+                modelTotalSample.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
+            }
+            check(modelResponseBuilder.isNotBlank()) { "Model returned an empty answer." }
+            stage = "history_save"
+            try {
+                saveHistory(userId, userPrompt, modelResponseBuilder.toString())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (requirePersistence) throw e
+                logger.warn("Chat history save failed for legacy stream user {}.", userId, e)
+            }
+            emit(ChatEvent(ChatEventType.DONE))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn("Chat history save failed. Continuing without persistence for user {}.", userId, e)
+            meterRegistry.counter(
+                "whoamai.chat.error.total", "stage", stage,
+                "exception", e::class.java.simpleName, "mode", mode
+            ).increment()
+            throw e
+        } finally {
+            requestSample.stop(meterRegistry.timer("whoamai.chat.total.duration"))
+        }
+    }
+
+    private suspend fun saveHistory(userId: String, userPrompt: String, modelResponse: String) {
+        recordSuspendTimer("whoamai.chat.history.save.duration") {
+            chatHistoryRepository.appendMessages(
+                userId = userId,
+                messages = listOf(
+                    ChatMessage(role = "user", text = userPrompt),
+                    ChatMessage(role = "model", text = modelResponse)
+                ),
+                maxTokens = PERSISTENCE_WINDOW_TOKENS
+            )
         }
     }
 

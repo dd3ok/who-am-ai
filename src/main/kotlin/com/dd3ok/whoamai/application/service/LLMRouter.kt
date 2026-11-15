@@ -18,7 +18,8 @@ class LLMRouter(
 
     suspend fun route(userPrompt: String, history: List<ChatMessage> = emptyList()): RouteDecision {
         val resume = resumeProviderPort.getResume()
-        val normalized = normalizeResumeQuery(userPrompt)
+        val resolvedPrompt = resolveQuery(userPrompt, history)
+        val normalized = normalizeResumeQuery(resolvedPrompt)
         val nameFragments = NameFragmentExtractor.extract(resume.name)
 
         if (isOwnServiceQuestion(normalized)) {
@@ -32,12 +33,12 @@ class LLMRouter(
             )
         }
 
-        if (!isLikelyOwnDomainQuestion(userPrompt, normalized, resume, nameFragments)) {
+        if (!isLikelyOwnDomainQuestion(resolvedPrompt, normalized, resume, nameFragments)) {
             logger.info("Routing defaulted to NON_RAG because prompt is not an owned-domain question.")
             return recordDecision(RouteDecision(QueryType.NON_RAG), "question_guard")
         }
 
-        val heuristicDecision = buildHeuristicDecision(userPrompt, normalized, resume, history)
+        val heuristicDecision = buildHeuristicDecision(resolvedPrompt, normalized, resume)
         if (heuristicDecision != null) {
             logger.info("Routing resolved by heuristic path: {}", heuristicDecision)
             return recordDecision(heuristicDecision, "heuristic")
@@ -48,9 +49,41 @@ class LLMRouter(
             company = null,
             project = null,
             skills = null,
-            keywords = extractKeywords(userPrompt, emptyList(), emptyList()).ifEmpty { null }
+            keywords = extractKeywords(resolvedPrompt, emptyList(), emptyList()).ifEmpty { null }
         )
         return recordDecision(decision, "intent_only")
+    }
+
+    /** Resolve short follow-ups before either rule retrieval or routing. Only user turns establish a topic. */
+    fun resolveQuery(userPrompt: String, history: List<ChatMessage>): String {
+        if (!isFollowUpQuestion(userPrompt)) return userPrompt
+        val resume = resumeProviderPort.getResume()
+        val names = NameFragmentExtractor.extract(resume.name)
+        val normalized = normalizeResumeQuery(userPrompt)
+        if (hasExternalNamedSubject(userPrompt, names) ||
+            NameFragmentExtractor.matches(normalized, names) ||
+            explicitTopics(normalized, resume).isNotEmpty()
+        ) return userPrompt
+
+        for (message in history.asReversed().filter { it.role == "user" }.take(6)) {
+            val previous = normalizeResumeQuery(message.text)
+            val topics = explicitTopics(previous, resume)
+            if (topics.isEmpty() && isFollowUpQuestion(message.text)) continue
+            // A topic switch ends the chain; never resurrect an older company from unrelated conversation.
+            if (!isLikelyOwnDomainQuestion(message.text, previous, resume, names)) return userPrompt
+            val target = topics.singleOrNull() ?: resume.name
+            return "$target — $userPrompt"
+        }
+        return userPrompt
+    }
+
+    private fun explicitTopics(query: String, resume: com.dd3ok.whoamai.domain.Resume): List<String> {
+        val projects = resume.projects.filter { it.title.isNotBlank() && query.contains(normalizeResumeQuery(it.title)) }
+        if (projects.isNotEmpty()) return projects.map { it.title }.distinct()
+        return resume.experiences.filter { exp ->
+            exp.company.isNotBlank() && (query.contains(normalizeResumeQuery(exp.company)) ||
+                exp.aliases.any { it.isNotBlank() && query.contains(normalizeResumeQuery(it)) })
+        }.map { it.company }.distinct()
     }
 
     companion object {
@@ -67,7 +100,8 @@ class LLMRouter(
         ).map { it.lowercase() }.toSet()
     }
 
-    private fun containsResumeSlots(normalizedPrompt: String, resume: com.dd3ok.whoamai.domain.Resume): Boolean {
+    private fun containsResumeSlots(userPrompt: String, resume: com.dd3ok.whoamai.domain.Resume): Boolean {
+        val normalizedPrompt = normalizeResumeQuery(userPrompt)
         if (SLOT_KEYWORDS.any { normalizedPrompt.contains(it) }) return true
 
         val companyHit = resume.experiences.any { exp ->
@@ -78,12 +112,12 @@ class LLMRouter(
 
         val projectHit = resume.projects.any { proj ->
             normalizedPrompt.contains(normalizeResumeQuery(proj.title)) ||
-                proj.skills.any { skill -> normalizedPrompt.contains(normalizeResumeQuery(skill)) } ||
-                proj.tags.any { tag -> normalizedPrompt.contains(normalizeResumeQuery(tag)) }
+                proj.skills.any { skill -> containsResumeTerm(userPrompt, skill) } ||
+                proj.tags.any { tag -> containsResumeTerm(userPrompt, tag) }
         }
         if (projectHit) return true
 
-        val skillHit = resume.skills.any { normalizedPrompt.contains(normalizeResumeQuery(it)) }
+        val skillHit = resume.skills.any { containsResumeTerm(userPrompt, it) }
         if (skillHit) return true
 
         val educationHit = resume.education.any { edu ->
@@ -96,8 +130,7 @@ class LLMRouter(
     private fun buildHeuristicDecision(
         userPrompt: String,
         normalizedPrompt: String,
-        resume: com.dd3ok.whoamai.domain.Resume,
-        history: List<ChatMessage>
+        resume: com.dd3ok.whoamai.domain.Resume
     ): RouteDecision? {
         val matchedCompanies = resume.experiences
             .filter { exp ->
@@ -113,21 +146,19 @@ class LLMRouter(
             .distinct()
 
         val matchedSkills = resume.skills
-            .filter { normalizedPrompt.contains(normalizeResumeQuery(it)) }
+            .filter { containsResumeTerm(userPrompt, it) }
             .distinct()
 
-        val hasResumeSignal = containsResumeSlots(normalizedPrompt, resume)
-        val followUpHints = resolveRecentHints(history, resume)
+        val hasResumeSignal = containsResumeSlots(userPrompt, resume)
         if (!hasResumeSignal && matchedCompanies.isEmpty() && matchedProjects.isEmpty() && matchedSkills.isEmpty()) {
             return null
         }
 
-        val company = matchedCompanies.firstOrNull() ?: followUpHints?.company
-        val project = matchedProjects.firstOrNull() ?: followUpHints?.project
-        val skills = matchedSkills.ifEmpty { followUpHints?.skills.orEmpty() }.ifEmpty { null }
+        val company = matchedCompanies.firstOrNull()
+        val project = matchedProjects.firstOrNull()
+        val skills = matchedSkills.ifEmpty { null }
         val extractedKeywords = mergeKeywords(
             extractKeywords(userPrompt, matchedCompanies, matchedSkills),
-            followUpHints?.keywordHints.orEmpty(),
             company,
             project
         )
@@ -140,54 +171,12 @@ class LLMRouter(
         )
     }
 
-    private fun resolveRecentHints(
-        history: List<ChatMessage>,
-        resume: com.dd3ok.whoamai.domain.Resume
-    ): RecentOwnDomainHints? {
-        if (history.isEmpty()) return null
-
-        return history.asReversed()
-            .take(6)
-            .mapNotNull { message ->
-                val normalized = normalizeResumeQuery(message.text)
-                val company = resume.experiences.firstOrNull { exp ->
-                    normalized.contains(normalizeResumeQuery(exp.company)) ||
-                        exp.aliases.any { alias -> normalized.contains(normalizeResumeQuery(alias)) }
-                }?.company
-                val project = resume.projects.firstOrNull { project ->
-                    normalized.contains(normalizeResumeQuery(project.title))
-                }?.title
-                val skills = resume.skills
-                    .filter { normalized.contains(normalizeResumeQuery(it)) }
-                    .distinct()
-
-                if (company == null && project == null && skills.isEmpty()) {
-                    null
-                } else {
-                    RecentOwnDomainHints(
-                        company = company ?: project?.let { title ->
-                            resume.projects.firstOrNull { it.title == title }?.company
-                        },
-                        project = project,
-                        skills = skills,
-                        keywordHints = buildList {
-                            company?.let(::add)
-                            project?.let(::add)
-                            addAll(skills)
-                        }
-                    )
-                }
-            }
-            .firstOrNull()
-    }
-
     private fun mergeKeywords(
         extractedKeywords: List<String>,
-        recentKeywordHints: List<String>,
         company: String?,
         project: String?
     ): List<String> {
-        return (listOfNotNull(company, project) + recentKeywordHints + extractedKeywords)
+        return (listOfNotNull(company, project) + extractedKeywords)
             .distinct()
             .take(5)
     }
@@ -217,12 +206,5 @@ class LLMRouter(
         ).increment()
         return decision
     }
-
-    private data class RecentOwnDomainHints(
-        val company: String? = null,
-        val project: String? = null,
-        val skills: List<String> = emptyList(),
-        val keywordHints: List<String> = emptyList()
-    )
 
 }

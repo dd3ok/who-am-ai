@@ -8,5 +8,8 @@ import org.springframework.context.annotation.Configuration
 data class WebSocketProperties(
     var allowedOrigins: List<String> = listOf("https://dd3ok.github.io", "http://localhost:3000"),
     var allowNullOrigin: Boolean = false,
-    var responseTimeoutMs: Long = 30_000L
+    var maxMessageBytes: Int = 65536,
+    var maxContentLength: Int = 4000,
+    var maxUuidLength: Int = 128,
+    var responseTimeoutMs: Long = 45000
 )

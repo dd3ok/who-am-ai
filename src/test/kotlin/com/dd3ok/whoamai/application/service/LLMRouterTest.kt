@@ -14,6 +14,27 @@ import org.junit.jupiter.api.Test
 
 class LLMRouterTest {
 
+    @Test
+    fun `subjectless follow up inherits the last user topic`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val history = listOf(ChatMessage(role = "user", text = "지마켓 경력 알려줘"))
+
+        for (question in listOf("그래서 성과는?", "왜 그렇게 했어?")) {
+            val decision = router.route(question, history)
+            assertEquals(QueryType.RESUME_RAG, decision.queryType, question)
+            assertEquals("지마켓", decision.company, question)
+        }
+    }
+
+    @Test
+    fun `new topic does not inherit old company hints`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val history = listOf(ChatMessage(role = "user", text = "지마켓 경력 알려줘"))
+
+        assertEquals(null, router.route("학력 알려줘", history).company)
+        assertEquals(QueryType.NON_RAG, router.route("당근은 어떤 기술을 쓰나요", history).queryType)
+    }
+
     private val resume = Resume(
         name = "유인재",
         summary = "백엔드 개발자",
@@ -37,6 +58,15 @@ class LLMRouterTest {
             )
         )
     )
+
+    @Test
+    fun `skill matching preserves English word boundaries and common separators`() {
+        org.junit.jupiter.api.Assertions.assertFalse(containsResumeTerm("Kubernetes 운영 경험", ".NET"))
+        org.junit.jupiter.api.Assertions.assertFalse(containsResumeTerm("JavaScript 프로젝트", "Java"))
+        org.junit.jupiter.api.Assertions.assertTrue(containsResumeTerm("SpringBoot 프로젝트", "Spring Boot"))
+        org.junit.jupiter.api.Assertions.assertTrue(containsResumeTerm("Spring Boot 프로젝트", "Spring Boot"))
+        org.junit.jupiter.api.Assertions.assertTrue(containsResumeTerm(".NET 마이그레이션", ".NET"))
+    }
 
     private val fakeResumeProvider = object : ResumeProviderPort {
         override fun getResume(): Resume = resume

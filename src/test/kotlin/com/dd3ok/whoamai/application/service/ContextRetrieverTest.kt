@@ -74,6 +74,17 @@ class ContextRetrieverTest {
     }
 
     @Test
+    fun `compound profile question retrieves both requested sections`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forEducation(), "EDUCATION")
+        persistencePort.stub(ChunkIdGenerator.forCertificates(), "CERTIFICATES")
+
+        assertEquals(
+            setOf("EDUCATION", "CERTIFICATES"),
+            contextRetriever.retrieveByRule("학력과 자격증 알려줘").toSet()
+        )
+    }
+
+    @Test
     fun `candidate intro questions are not mistaken for model identity questions`() = runTest {
         val expected = "SUMMARY"
         persistencePort.stub(ChunkIdGenerator.forSummary(), expected)
@@ -265,6 +276,45 @@ class ContextRetrieverTest {
         )
 
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `benchmark override reaches vector search for every retrieval profile`() = runTest {
+        val retriever = ContextRetriever(persistencePort, providerPort, ownDomainProfileProvider, true, 0.81)
+        retriever.retrieveByVector("지마켓 경력 알려줘", RouteDecision(QueryType.RESUME_RAG, company = "지마켓"))
+        assertEquals(0.81, persistencePort.lastSimilarityThreshold)
+        retriever.retrieveByVector("유인재의 협업 강점 알려줘", RouteDecision(QueryType.RESUME_RAG))
+        assertEquals(0.81, persistencePort.lastSimilarityThreshold)
+    }
+
+    @Test
+    fun `sources preserve stable project id and readable title`() = runTest {
+        val projectId = ChunkIdGenerator.forProject("정산 플랫폼")
+        persistencePort.stub(projectId, "프로젝트 본문")
+        val source = contextRetriever.retrieveSourcesByRule("정산 플랫폼 설명해줘").single()
+        assertEquals(projectId, source.chunkId)
+        assertEquals("정산 플랫폼", source.title)
+        assertEquals("프로젝트 본문", source.content)
+        assertEquals(null, source.url)
+    }
+
+    @Test
+    fun `source links are limited to registered public http urls`() = runTest {
+        val projectId = ChunkIdGenerator.forProject("정산 플랫폼")
+        persistencePort.stub(projectId, "본문")
+        for ((url, expected) in listOf(
+            "https://example.com/project" to "https://example.com/project",
+            "javascript:alert(1)" to null,
+            "https://user:password@example.com/project" to null,
+            "not a URL" to null
+        )) {
+            val provider = object : ResumeProviderPort {
+                override fun getResume() = resume.copy(projects = listOf(resume.projects.single().copy(sourceUrl = url)))
+                override fun isInitialized() = true
+            }
+            val retriever = ContextRetriever(persistencePort, provider, ownDomainProfileProvider, true)
+            assertEquals(expected, retriever.retrieveSourcesByRule("정산 플랫폼 설명해줘").single().url)
+        }
     }
 
     private class FakeResumePersistencePort : ResumePersistencePort {

@@ -7,4 +7,5 @@ data class StreamMessage @JsonCreator constructor(
     @param:JsonProperty("uuid") val uuid: String,
     @param:JsonProperty("type") val type: MessageType,
     @param:JsonProperty("content") val content: String,
+    @param:JsonProperty("sessionToken") val sessionToken: String? = null,
 )

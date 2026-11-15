@@ -9,6 +9,8 @@ import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
 import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatHistory
+import com.dd3ok.whoamai.domain.ChatEvent
+import com.dd3ok.whoamai.domain.ChatEventType
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.Experience
 import com.dd3ok.whoamai.domain.MessageType
@@ -32,6 +34,33 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.assertFailsWith
 
 class ChatServiceTest {
+
+    @Test
+    fun `failed append reports incomplete events without generating another answer`() = runTest {
+        var saves = 0
+        var generations = 0
+        val repository = object : ChatHistoryRepository {
+            override suspend fun findByUserId(userId: String) = ChatHistory(userId)
+            override suspend fun save(chatHistory: ChatHistory): ChatHistory {
+                saves++
+                throw IllegalStateException("append failed")
+            }
+        }
+        val gemini = object : GeminiPort {
+            override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
+                generations++
+                return flowOf("this answer")
+            }
+        }
+        val service = createService(gemini, repository)
+        val events = mutableListOf<ChatEvent>()
+        assertFailsWith<IllegalStateException> {
+            service.streamChatEvents(StreamMessage("shared", MessageType.USER, "this question")).toList(events)
+        }
+        assertEquals(listOf(ChatEventType.SOURCES, ChatEventType.DELTA), events.map { it.type })
+        assertEquals(1, generations)
+        assertEquals(1, saves)
+    }
 
     @Test
     fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
@@ -117,6 +146,8 @@ class ChatServiceTest {
         assertTimerRecorded(meterRegistry, "whoamai.chat.rag.rule.duration")
         assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.first_token.duration")
         assertTimerRecorded(meterRegistry, "whoamai.chat.gemini.total.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.first_token.duration")
+        assertTimerRecorded(meterRegistry, "whoamai.chat.total.duration")
     }
 
     @Test

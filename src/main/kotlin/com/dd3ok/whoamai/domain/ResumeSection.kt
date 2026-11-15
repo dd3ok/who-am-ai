@@ -24,7 +24,18 @@ data class Education(val school: String = "", val major: String = "", val period
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class Experience(val company: String = "", val aliases: List<String> = emptyList(), val period: Period = Period(), val position: String = "", val tags: List<String> = emptyList())
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class Project(val title: String = "", val company: String = "", val period: Period = Period(), val skills: List<String> = emptyList(), val tags: List<String> = emptyList(), val description: String = "")
+data class Project(
+    val title: String = "",
+    val company: String = "",
+    val period: Period = Period(),
+    val skills: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val description: String = "",
+    val problem: String = "",
+    val contribution: String = "",
+    val outcome: String = "",
+    val sourceUrl: String = ""
+)
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class Period(val start: String = "", val end: String = "")
 @JsonIgnoreProperties(ignoreUnknown = true)

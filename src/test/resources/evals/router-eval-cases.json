@@ -11,7 +11,7 @@
   {"question":"요즘 뭐 하고 있어?","expectedType":"RESUME_RAG"},
   {"question":"유인재의 협업 방식과 커뮤니케이션 강점을 알려줘","expectedType":"RESUME_RAG"},
   {"question":"유인재의 트러블슈팅 경험 중 가장 임팩트 있었던 사례는?","expectedType":"RESUME_RAG"},
-  {"question":"백엔드 아키텍처 관련 강점이 뭐야?","expectedType":"NON_RAG"},
+  {"question":"백엔드 아키텍처 관련 강점이 뭐야?","expectedType":"RESUME_RAG"},
   {"question":"너는 뭐로 만들어졌어?","expectedType":"RESUME_RAG"},
   {"question":"너의 스택이 뭐야?","expectedType":"RESUME_RAG"},
   {"question":"who-am-ai는 어떤 기술로 만들었나요","expectedType":"RESUME_RAG"},

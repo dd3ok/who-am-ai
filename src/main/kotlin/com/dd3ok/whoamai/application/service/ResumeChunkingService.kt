@@ -7,6 +7,7 @@ import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.convertValue
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.time.YearMonth
 
 /**
  * Domain 객체(Resume)를 Persistence Layer에서 사용할 DTO(ResumeChunk)로
@@ -83,13 +84,34 @@ class ResumeChunkingService(
         val content = "전체 경력 기간 정보는 다음과 같습니다: " +
                 resume.experiences.joinToString("; ") { exp ->
                     "${exp.company}에서 ${exp.period.start}부터 ${exp.period.end}까지 근무"
-                } + ". 이 정보를 바탕으로 총 경력을 계산해서 알려주세요."
+                } + ". " + totalExperience(resume.experiences)
         return ResumeChunk(
             id = ChunkIdGenerator.forTotalExperience(),
             type = "summary",
             content = content,
             source = objectMapper.convertValue(mapOf("items" to resume.experiences))
         )
+    }
+
+    private fun totalExperience(experiences: List<Experience>): String {
+        val ranges = experiences.map { experience ->
+            runCatching {
+                val start = YearMonth.parse(experience.period.start)
+                val end = YearMonth.parse(experience.period.end)
+                require(!end.isBefore(start))
+                (start.year * 12L + start.monthValue)..(end.year * 12L + end.monthValue)
+            }.getOrNull()
+        }
+        if (ranges.isEmpty() || ranges.any { it == null }) return "정확한 총 경력을 계산할 날짜 정보가 부족합니다."
+        var coveredUntil = Long.MIN_VALUE
+        var months = 0L
+        for (range in ranges.filterNotNull().sortedBy { it.first }) {
+            val start = maxOf(range.first, coveredUntil + 1)
+            if (start <= range.last) months += range.last - start + 1
+            coveredUntil = maxOf(coveredUntil, range.last)
+        }
+        return "총 경력은 ${months / 12}년 ${months % 12}개월입니다. " +
+            "월 단위로 입사월과 퇴사월을 포함하고, 겹치는 근무 월은 한 번만 계산한 값입니다."
     }
 
     private fun createEducationChunk(resume: Resume): ResumeChunk? {
@@ -177,11 +199,16 @@ class ResumeChunkingService(
         return resume.projects.map { proj ->
             val contentParts = mutableListOf(
                 "프로젝트 '${proj.title}'에 대한 상세 정보입니다.",
-                "소속은 ${proj.company}이며, 기간은 ${proj.period.start}부터 ${proj.period.end}까지입니다."
+                "소속은 ${proj.company}입니다.",
+                if (proj.period.start.isNotBlank() && proj.period.end.isNotBlank())
+                    "기간은 ${proj.period.start}부터 ${proj.period.end}까지입니다." else "프로젝트 기간은 기록되어 있지 않습니다."
             )
             proj.description.takeIf { it.isNotBlank() }?.let { description ->
                 contentParts += "프로젝트 설명은 다음과 같습니다: $description"
             }
+            proj.problem.takeIf { it.isNotBlank() }?.let { contentParts += "해결할 문제: $it" }
+            proj.contribution.takeIf { it.isNotBlank() }?.let { contentParts += "본인 기여: $it" }
+            proj.outcome.takeIf { it.isNotBlank() }?.let { contentParts += "확인된 결과: $it" }
             if (proj.skills.isNotEmpty()) {
                 contentParts += "주요 기술은 ${proj.skills.joinToString(", ")} 입니다."
             }
