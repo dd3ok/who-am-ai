@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [[ -z "${_100MILION_API_KEY:-}" || -z "${GEMINI_EMBEDDING_API_KEY:-${GEMINI_API_KEY:-}}" || -z "${EVAL_MONGO_URI:-}" ]]; then
-  echo "_100MILION_API_KEY, GEMINI_EMBEDDING_API_KEY와 별도 평가 DB의 EVAL_MONGO_URI를 설정해주세요." >&2
+if [[ -z "${GEMINI_API_KEY:-}" || -z "${EVAL_MONGO_URI:-}" ]]; then
+  echo "GEMINI_API_KEY와 별도 평가 DB의 EVAL_MONGO_URI를 설정해주세요." >&2
   exit 1
 fi
 

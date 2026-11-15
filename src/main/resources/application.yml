@@ -9,17 +9,17 @@ spring:
       embedding:
         text: google-genai
     openai:
-      base-url: https://100milionseek.top/v1
-      api-key: ${_100MILION_API_KEY}
+      base-url: https://generativelanguage.googleapis.com/v1beta/openai
+      api-key: ${GEMINI_API_KEY}
       timeout: 110s
       max-retries: 0
       chat:
-        model: deepseek-v4.1-flash-free
-        temperature: 0.75
+        model: gemini-3.8-flash
+        reasoning-effort: medium
         max-tokens: 8192
     google:
       genai:
-        # Gemini is used only to keep embeddings compatible with existing Atlas vectors.
+        # Preserve the embedding model and dimensions used by existing Atlas vectors.
         api-key: ${GEMINI_EMBEDDING_API_KEY:${GEMINI_API_KEY:}}
         embedding:
           api-key: ${spring.ai.google.genai.api-key}
@@ -90,8 +90,8 @@ who-am-ai:
   ai:
     chat:
       # The existing streaming adapter applies these options to the configured Spring AI provider.
-      # https://100milionseek.top/docs
-      models: [deepseek-v4.1-flash-free]
-      temperature: 0.75
+      # https://ai.google.dev/gemini-api/docs/openai#thinking
+      models: [gemini-3.8-flash]
+      reasoning-effort: medium
       max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000

@@ -16,7 +16,7 @@ import org.springframework.core.io.ClassPathResource
 @SpringBootTest(
     properties = [
         "spring.mongodb.uri=\${EVAL_MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
-        "spring.ai.openai.api-key=\${_100MILION_API_KEY:test-key}",
+        "spring.ai.openai.api-key=\${GEMINI_API_KEY:test-key}",
         "spring.ai.google.genai.api-key=\${GEMINI_EMBEDDING_API_KEY:\${GEMINI_API_KEY:test-key}}",
         "spring.ai.google.genai.embedding.api-key=\${GEMINI_EMBEDDING_API_KEY:\${GEMINI_API_KEY:test-key}}"
     ]
@@ -39,8 +39,7 @@ class RagRetrievalThresholdBenchmarkTest {
 
     @BeforeAll
     fun warmup() = runBlocking {
-        assumeTrue(!System.getenv("_100MILION_API_KEY").isNullOrBlank(), "_100MILION_API_KEY is required")
-        assumeTrue(!System.getenv("GEMINI_EMBEDDING_API_KEY").isNullOrBlank() || !System.getenv("GEMINI_API_KEY").isNullOrBlank(), "Gemini embedding key is required")
+        assumeTrue(!System.getenv("GEMINI_API_KEY").isNullOrBlank(), "GEMINI_API_KEY is required")
         assumeTrue(!System.getenv("EVAL_MONGO_URI").isNullOrBlank(), "EVAL_MONGO_URI is required")
         val result = manageResumeUseCase.reindexResumeData()
         println("RETRIEVAL_BENCHMARK|phase=reindex|result=$result")

@@ -87,10 +87,7 @@ tasks.register<Test>("liveEval") {
     outputs.upToDateWhen { false }
     doFirst {
         require(!System.getenv("EVAL_MONGO_URI").isNullOrBlank()) { "Set EVAL_MONGO_URI to a dedicated evaluation database." }
-        require(!System.getenv("_100MILION_API_KEY").isNullOrBlank()) { "_100MILION_API_KEY is required for live evaluations." }
-        require(!System.getenv("GEMINI_EMBEDDING_API_KEY").isNullOrBlank() || !System.getenv("GEMINI_API_KEY").isNullOrBlank()) {
-            "GEMINI_EMBEDDING_API_KEY (or legacy GEMINI_API_KEY) is required for embedding evaluations."
-        }
+        require(!System.getenv("GEMINI_API_KEY").isNullOrBlank()) { "GEMINI_API_KEY is required for live evaluations." }
     }
 }
 

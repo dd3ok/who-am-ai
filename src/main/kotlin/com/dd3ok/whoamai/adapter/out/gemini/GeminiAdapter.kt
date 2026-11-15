@@ -41,7 +41,7 @@ class GeminiAdapter(
     private fun buildChatOptions(model: String): OpenAiChatOptions {
         return OpenAiChatOptions.builder()
             .model(model)
-            .temperature(chatModelProperties.temperature.toDouble())
+            .reasoningEffort(chatModelProperties.reasoningEffort)
             .maxTokens(chatModelProperties.maxOutputTokens)
             .build()
     }

@@ -1,6 +1,6 @@
 # Who Am AI
 
-이력서 JSON을 기반으로 답변하는 AI 이력서 RAG 챗봇입니다. Kotlin과 Spring Boot 4로 작성되어 있고, 이력서 내용을 청크로 나눈 뒤 MongoDB Atlas Vector Search에 임베딩을 저장합니다. 사용자는 WebSocket으로 질문을 보내고, 서비스는 관련 이력 컨텍스트를 찾아 100milionseek의 OpenAI 호환 API로 답변을 스트리밍합니다. Gemini는 기존 벡터와 호환되는 임베딩 생성에만 사용합니다.
+이력서 JSON을 기반으로 답변하는 AI 이력서 RAG 챗봇입니다. Kotlin과 Spring Boot 4로 작성되어 있고, 이력서 내용을 청크로 나눈 뒤 MongoDB Atlas Vector Search에 임베딩을 저장합니다. 사용자는 WebSocket으로 질문을 보내고, 서비스는 관련 이력 컨텍스트를 찾아 Google Gemini 3.8 Flash로 답변을 스트리밍합니다. 채팅은 Google 공식 OpenAI 호환 엔드포인트, 임베딩은 Google GenAI API를 사용합니다.
 
 ## 주요 기능
 
@@ -17,9 +17,9 @@
 
 - 언어 및 런타임: Kotlin 2.3.21, JDK 21
 - 프레임워크: Spring Boot 4.1.0, Spring WebFlux, WebSocket
-- AI: Spring AI 2.0.0, 100milionseek, Google GenAI embedding
+- AI: Spring AI 2.0.0, Google Gemini chat / embedding
 - JSON: Jackson 3
-- chat 모델: `deepseek-v4.1-flash-free`
+- chat 모델: `gemini-3.8-flash`, reasoning effort `medium`
 - embedding 모델: `gemini-embedding-001`, 768 dimensions
 - 저장소: MongoDB Atlas Vector Search
 - 빌드: Gradle Wrapper
@@ -31,7 +31,7 @@
 3. `LLMRouter`가 사용자 질문을 보고 `RESUME_RAG` 또는 `NON_RAG`로 분류합니다.
 4. `ContextRetriever`가 먼저 규칙 기반으로 컨텍스트를 찾고, 필요하면 벡터 검색을 사용합니다.
 5. `CareerContextPlanner`와 `CareerPromptAssembler`가 프롬프트 입력을 구성합니다.
-6. `ChatService`가 100milionseek 응답을 WebSocket 스트림으로 전달하고 대화 기록을 저장합니다.
+6. `ChatService`가 Gemini 응답을 WebSocket 스트림으로 전달하고 대화 기록을 저장합니다.
 
 ## API
 
@@ -58,7 +58,7 @@ curl -X POST http://localhost:8080/api/admin/resume/reindex \
 - JDK 21
 - MongoDB Atlas cluster
 - MongoDB Atlas Vector Search index
-- 100milionseek API key와 별도의 Google GenAI embedding API key
+- Google Gemini API key
 - Gradle Wrapper 실행이 가능한 셸 환경
 
 ## 환경 변수
@@ -67,15 +67,13 @@ curl -X POST http://localhost:8080/api/admin/resume/reindex \
 
 ```bash
 export MONGO_URI="mongodb+srv://<user>:<password>@<cluster>/<database>?retryWrites=true&w=majority"
-export _100MILION_API_KEY="<100milionseek-key>"
-export GEMINI_EMBEDDING_API_KEY="<google-genai-embedding-key>"
+export GEMINI_API_KEY="<google-genai-key>"
 ```
 
-Render는 숫자로 시작하는 환경변수 이름을 허용하지 않으므로 `_100MILION_API_KEY`의 앞 밑줄을 유지합니다.
-두 키는 백엔드 환경변수로만 설정하며, 코드·프런트 공개 환경변수·로그에 넣지 않습니다.
-기존 `GEMINI_API_KEY`는 임베딩 키의 대체 이름으로 계속 지원합니다. 새 변수와 함께 있으면 `GEMINI_EMBEDDING_API_KEY`가 우선합니다.
+`GEMINI_API_KEY`는 채팅과 임베딩에 공통으로 사용합니다. 임베딩만 별도 프로젝트를 쓰려면 선택적으로 `GEMINI_EMBEDDING_API_KEY`를 지정합니다.
+키는 백엔드 환경변수로만 설정하며, 코드·프런트 공개 환경변수·로그에 넣지 않습니다.
 `MONGO_URI`는 벡터를 저장하고 검색하는 DB 연결입니다. 질문을 벡터로 만드는 임베딩 API를 대신하지 않습니다.
-100milionseek의 공개 문서에는 임베딩 API가 없으므로, 기존 `gemini-embedding-001`과 768차원 Atlas 인덱스를 유지합니다.
+기존 `gemini-embedding-001`과 768차원 Atlas 인덱스를 유지합니다.
 
 관리자 API를 사용하려면 다음 값도 설정합니다.
 
@@ -85,7 +83,7 @@ export ADMIN_API_KEY="<admin-secret>"
 
 ## 설정
 
-채팅과 임베딩의 제공자·키를 분리합니다. Spring AI 2.0 모델 옵션은 `.options` 하위가 아닌 아래 경로에 둡니다.
+채팅은 Google의 OpenAI 호환 API 형식을 사용하며, 실제 요청은 Google로 전송됩니다. Spring AI 2.0 모델 옵션은 `.options` 하위가 아닌 아래 경로에 둡니다.
 
 ```yaml
 spring:
@@ -95,13 +93,13 @@ spring:
       embedding:
         text: google-genai
     openai:
-      base-url: https://100milionseek.top/v1
-      api-key: ${_100MILION_API_KEY}
+      base-url: https://generativelanguage.googleapis.com/v1beta/openai
+      api-key: ${GEMINI_API_KEY}
       timeout: 110s
       max-retries: 0
       chat:
-        model: deepseek-v4.1-flash-free
-        temperature: 0.75
+        model: gemini-3.8-flash
+        reasoning-effort: medium
         max-tokens: 8192
     google:
       genai:
@@ -114,14 +112,14 @@ spring:
             task-type: RETRIEVAL_DOCUMENT
 ```
 
-요청별 모델 옵션은 기존 애플리케이션 설정인 `who-am-ai.ai.chat.*`에 둡니다. 현재 제공자가 문서화한 모델 한 개만 사용하며, `spring.ai.openai.chat.model`과 맞춥니다.
+요청별 모델 옵션은 기존 애플리케이션 설정인 `who-am-ai.ai.chat.*`에 둡니다. 모델과 추론 단계는 `spring.ai.openai.chat.*` 기본값과 맞춥니다.
 
 ```yaml
 who-am-ai:
   ai:
     chat:
-      models: [deepseek-v4.1-flash-free]
-      temperature: 0.75
+      models: [gemini-3.8-flash]
+      reasoning-effort: medium
       max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000
 ```
@@ -129,7 +127,7 @@ who-am-ai:
 배포 환경에서 `application.yml`을 수정하지 않고 모델 옵션을 바꾸려면 Spring Boot 설정 방식으로 주입하면 됩니다.
 
 ```bash
-export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["deepseek-v4.1-flash-free"],"temperature":0.75,"max-output-tokens":8192,"rate-limit-cooldown-ms":60000}}}}'
+export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["gemini-3.8-flash"],"reasoning-effort":"medium","max-output-tokens":8192,"rate-limit-cooldown-ms":60000}}}}'
 ```
 
 ## MongoDB Atlas Vector Search
@@ -240,8 +238,7 @@ Docker 이미지는 저장소에 포함된 Gradle Wrapper로 빌드하며, Sprin
 docker build -t who-am-ai .
 docker run --rm -p 8080:10000 \
   -e MONGO_URI="$MONGO_URI" \
-  -e _100MILION_API_KEY="$_100MILION_API_KEY" \
-  -e GEMINI_EMBEDDING_API_KEY="$GEMINI_EMBEDDING_API_KEY" \
+  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
   -e ADMIN_API_KEY="$ADMIN_API_KEY" \
   who-am-ai
 ```
@@ -278,10 +275,10 @@ TEST_MONGO_URI=mongodb://127.0.0.1:27017 ./gradlew mongoTest
 It checks competing appends, migration of history without a revision, atomic shared counters, TTL indexes and session persistence.
 CI runs it against a MongoDB service container alongside the build and Docker packaging check.
 
-`OpenAiCompatibilityTest` checks actual Spring AI HTTP requests, authentication headers, SSE responses, and failed-auth retry behavior using a local server and fake keys only.
+`OpenAiCompatibilityTest` checks actual Spring AI HTTP requests, Gemini model / medium reasoning settings, authentication headers, SSE responses, and failed-auth retry behavior using a local server and fake keys only.
 
-Live tests require `EVAL_MONGO_URI` pointing to a **dedicated evaluation database**, `_100MILION_API_KEY`,
-and `GEMINI_EMBEDDING_API_KEY` (or the legacy `GEMINI_API_KEY`).
+Live tests require `EVAL_MONGO_URI` pointing to a **dedicated evaluation database** and `GEMINI_API_KEY`.
+An optional `GEMINI_EMBEDDING_API_KEY` overrides the key used for embeddings only.
 They reindex that evaluation database and use paid/quota-limited API calls. Review emitted answers for factual accuracy;
 request errors and blank responses fail the run. Keep prompt counts low:
 
@@ -318,10 +315,10 @@ Benchmark and `rag.search.*` JVM properties are forwarded to the test JVM. Live 
 
 ## 모델과 요청 제한
 
-채팅 모델은 `deepseek-v4.1-flash-free`입니다. `429` 등 요청 제한 응답을 받으면 기존 `rate-limit-cooldown-ms` 동안 모델 호출을 쉬며, 이미 일부 답변을 전송한 요청은 다른 모델로 이어 붙이지 않습니다. 최대 응답 토큰 기본값은 8192입니다.
+채팅 모델은 `gemini-3.8-flash`, 추론 강도는 `medium`입니다. Google의 OpenAI 호환 API에서 `reasoning_effort: medium`은 Gemini의 `thinking_level: medium`에 대응합니다. 기존 temperature 옵션은 제거하고 추론 단계로 제어합니다. `429` 등 요청 제한 응답을 받으면 기존 `rate-limit-cooldown-ms` 동안 모델 호출을 쉬며, 이미 일부 답변을 전송한 요청은 다른 모델로 이어 붙이지 않습니다. 최대 출력 토큰 기본값은 8192입니다.
 
 긴 답변 뒤에도 이전 사용자 질문이 남도록 최근 대화의 범위를 함께 늘렸습니다. 기존 글자 수 기반 추정으로 API 대화창은 65,536토큰, 저장 대화창은 131,072토큰 이내로 제한합니다. 이는 모델 토크나이저의 정확한 토큰 수가 아닌 보수적 추정값입니다.
 
 SDK의 자동 HTTP 재시도는 끄고 요청 타임아웃은 110초로 설정합니다. 전체 WebSocket 요청 제한은 120초이며, 프런트는 서버의 완료·오류 이벤트를 받을 수 있도록 150초까지 기다립니다.
-서비스별 한도와 오류 정책은 [100milionseek 공식 문서](https://100milionseek.top/docs)에서 확인합니다.
-임베딩의 quota와 결제 상태는 채팅 API와 별개이므로 Google AI Studio에서 따로 확인해야 합니다.
+설정은 [Google OpenAI 호환 API 문서](https://ai.google.dev/gemini-api/docs/openai#thinking)와 [Gemini 3.8 Flash 모델 문서](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)에서 확인합니다.
+모델별 quota와 프로젝트 결제 상태는 Google AI Studio에서 확인합니다.

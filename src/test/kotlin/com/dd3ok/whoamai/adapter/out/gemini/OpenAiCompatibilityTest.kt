@@ -35,7 +35,7 @@ class OpenAiCompatibilityTest {
     private val mapper = jacksonObjectMapper()
 
     @Test
-    fun `configured provider uses new environment key and OpenAI streaming wire format`() {
+    fun `Gemini Flash uses medium reasoning and the existing key over OpenAI streaming`() {
         val stream = listOf(
             chunk("{\"role\":\"assistant\"}"),
             chunk("{\"content\":\"정상\"}"),
@@ -47,7 +47,7 @@ class OpenAiCompatibilityTest {
         withServer(200, "text/event-stream", stream) { baseUrl, requests ->
             contextRunner(baseUrl).run { context ->
                 assertNull(context.startupFailure)
-                assertEquals("gemini-embedding-local-test-only", context.environment.getProperty("spring.ai.google.genai.embedding.api-key"))
+                assertEquals("gemini-local-test-only", context.environment.getProperty("spring.ai.google.genai.embedding.api-key"))
                 val adapter = adapter(context.getBean(StreamingChatModel::class.java),
                     context.getBean(GeminiChatModelProperties::class.java))
 
@@ -59,17 +59,19 @@ class OpenAiCompatibilityTest {
                 assertEquals("정상 응답", answer)
                 val request = requests.single()
                 assertEquals("POST", request.method)
-                assertEquals("/v1/chat/completions", request.path)
-                assertEquals("Bearer hms-local-test-only", request.authorization)
+                assertEquals("/v1beta/openai/chat/completions", request.path)
+                assertEquals("Bearer gemini-local-test-only", request.authorization)
                 assertEquals("spring-ai-openai", request.userAgent)
                 val body = mapper.readTree(request.body)
-                assertEquals("deepseek-v4.1-flash-free", body["model"].stringValue())
+                assertEquals("gemini-3.8-flash", body["model"].stringValue())
+                assertEquals("medium", body["reasoning_effort"].stringValue())
+                assertFalse(body.hasNonNull("temperature"))
                 assertEquals(true, body["stream"].asBoolean())
                 assertEquals(8192, body["max_tokens"].asInt())
                 assertFalse(body.hasNonNull("max_completion_tokens"))
                 assertEquals("system", body["messages"][0]["role"].stringValue())
                 assertEquals("프로젝트를 설명해줘", body["messages"][1]["content"].stringValue())
-                assertFalse(request.body.contains("hms-local-test-only"))
+                assertFalse(request.body.contains("gemini-local-test-only"))
             }
         }
     }
@@ -101,8 +103,7 @@ class OpenAiCompatibilityTest {
                 .forEach { context.environment.propertySources.addLast(it) }
         }
         .withPropertyValues(
-            "_100MILION_API_KEY=hms-local-test-only",
-            "GEMINI_API_KEY=gemini-embedding-local-test-only",
+            "GEMINI_API_KEY=gemini-local-test-only",
             "spring.ai.openai.base-url=$baseUrl",
             "spring.ai.openai.timeout=5s"
         )
@@ -117,7 +118,7 @@ class OpenAiCompatibilityTest {
         }, SimpleMeterRegistry())
 
     private fun chunk(delta: String, finishReason: String = "null") =
-        "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-v4.1-flash-free\",\"choices\":[{\"index\":0,\"delta\":$delta,\"finish_reason\":$finishReason}]}\n\n"
+        "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gemini-3.8-flash\",\"choices\":[{\"index\":0,\"delta\":$delta,\"finish_reason\":$finishReason}]}\n\n"
 
     private fun withServer(status: Int, contentType: String, response: String, action: (String, List<RecordedRequest>) -> Unit) {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
@@ -134,7 +135,7 @@ class OpenAiCompatibilityTest {
         }
         server.start()
         try {
-            action("http://127.0.0.1:${server.address.port}/v1", requests)
+            action("http://127.0.0.1:${server.address.port}/v1beta/openai", requests)
         } finally {
             server.stop(0)
         }
