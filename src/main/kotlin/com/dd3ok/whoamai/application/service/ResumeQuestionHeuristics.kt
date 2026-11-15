@@ -137,11 +137,18 @@ internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<Strin
 internal fun isFollowUpQuestion(prompt: String): Boolean {
     // A transition word alone does not refer back to the previous project or company.
     val normalized = normalizeResumeQuery(stripConversationTransition(prompt))
-    return listOf(
+    if (listOf(
         "거기", "그프로젝트", "그회사", "그때", "그중", "왜그렇게", "왜그걸",
         "더자세", "조금더", "자세히"
     ).any { normalized.startsWith(it) } ||
         Regex("^(?:어떤|무슨)?(?:성과|역할|결과|이유)(?:은|는|이|가|을|를|도|$)").containsMatchIn(normalized)
+    ) return true
+
+    // Omitted subjects can still refer to work already discussed; general advice starts a new topic.
+    return Regex(
+        "^(?:(?:사용|활용|도입)(?:한|했던)(?:기술|스택|도구)|(?:가장|제일)?어려웠던(?:점|부분))"
+    ).containsMatchIn(normalized) &&
+        !listOf("공부", "작성", "추천").any { normalized.contains(it) }
 }
 
 private fun stripConversationTransition(prompt: String): String =

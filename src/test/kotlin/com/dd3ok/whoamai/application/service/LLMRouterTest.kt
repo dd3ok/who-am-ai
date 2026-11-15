@@ -22,7 +22,10 @@ class LLMRouterTest {
         for (question in listOf(
             "그래서 성과는?", "왜 그렇게 했어?", "그럼 성과는?", "그래서 역할은?",
             "그럼 그 회사에서 사용한 기술은?", "그래서, 그럼 결과는?",
-            "그럼 성과를 알려줘", "그래서 어떤 결과가 나왔어?", "그럼 역할이 뭐였어?"
+            "그럼 성과를 알려줘", "그래서 어떤 결과가 나왔어?", "그럼 역할이 뭐였어?",
+            "그럼 사용한 기술은?", "그래서 사용했던 기술 스택은?", "사용한 기술 알려줘",
+            "그럼 어려웠던 점은?", "그래서 가장 어려웠던 부분은?",
+            "그럼 어려웠던 점은 어떤 방법으로 해결했어?"
         )) {
             val decision = router.route(question, history)
             assertEquals(QueryType.RESUME_RAG, decision.queryType, question)
@@ -46,7 +49,8 @@ class LLMRouterTest {
         for (question in listOf(
             "그럼 오늘 날씨 알려줘", "그래서 내일 날씨는?", "그럼 점심 메뉴 추천해줘",
             "그럼 보안 어떻게 공부해?", "그럼 당근은 Spring Boot를 사용하나요?",
-            "그럼 성과 보고서는 어떻게 작성해?"
+            "그럼 성과 보고서는 어떻게 작성해?", "그럼 당근이 사용한 기술은?",
+            "그럼 사용한 기술은 어떻게 공부해?", "그럼 어려웠던 점을 자기소개서에 어떻게 작성해?"
         )) {
             assertEquals(question, router.resolveQuery(question, history), question)
             val decision = router.route(question, history)
@@ -69,6 +73,23 @@ class LLMRouterTest {
         val question = "더 자세히 알려줘"
         assertEquals(question, router.resolveQuery(question, history))
         assertEquals(QueryType.NON_RAG, router.route(question, history).queryType)
+    }
+
+    @Test
+    fun `implicit work details require a preceding portfolio topic`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val topicSwitch = listOf(
+            ChatMessage("user", "지마켓 경력 알려줘"),
+            ChatMessage("user", "그럼 오늘 날씨 알려줘")
+        )
+        for (history in listOf(emptyList(), topicSwitch)) {
+            for (question in listOf("그럼 사용한 기술은?", "그럼 어려웠던 점은?")) {
+                assertEquals(question, router.resolveQuery(question, history), question)
+                val decision = router.route(question, history)
+                assertEquals(null, decision.company, question)
+                assertEquals(null, decision.project, question)
+            }
+        }
     }
 
     private val resume = Resume(
