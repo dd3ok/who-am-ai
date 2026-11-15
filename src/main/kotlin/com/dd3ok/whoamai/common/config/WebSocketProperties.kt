@@ -11,5 +11,5 @@ data class WebSocketProperties(
     var maxMessageBytes: Int = 65536,
     var maxContentLength: Int = 4000,
     var maxUuidLength: Int = 128,
-    var responseTimeoutMs: Long = 45000
+    var responseTimeoutMs: Long = 120000
 )

@@ -80,7 +80,7 @@ class ChatServiceTest {
     fun `saved chat history is trimmed before persistence`() = runTest {
         val geminiPort = RecordingGeminiPort()
         val chatHistoryRepository = InMemoryChatHistoryRepository()
-        val longMessage = "a".repeat(2000)
+        val longMessage = "a".repeat(20000)
         val existingHistory = List(8) { index ->
             ChatMessage(
                 role = if (index % 2 == 0) "user" else "model",
@@ -266,6 +266,26 @@ class ChatServiceTest {
 
         val finalPrompt = geminiPort.lastHistory.last().text
         assertTrue(finalPrompt.startsWith("RAG::"), "Expected RAG prompt for history follow-up, but was: $finalPrompt")
+        assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
+    }
+
+    @Test
+    fun `long answer does not erase the user topic needed for the next follow up`() = runTest {
+        val repository = InMemoryChatHistoryRepository()
+        val persistencePort = HistoryAwareResumePersistencePort()
+        var responseCount = 0
+        val model = object : GeminiPort {
+            override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> =
+                flowOf(if (responseCount++ == 0) "a".repeat(40000) else "후속 응답")
+        }
+        val service = createService(model, repository, SampleResumeProviderPort(), persistencePort)
+
+        service.streamChatEvents(StreamMessage("long-answer", MessageType.USER, "지마켓 경력 알려줘")).toList()
+        val saved = repository.findByUserId("long-answer") ?: error("history not saved")
+        assertTrue(saved.history.any { it.role == "user" && it.text == "지마켓 경력 알려줘" })
+
+        val events = service.streamChatEvents(StreamMessage("long-answer", MessageType.USER, "그럼 사용한 기술은?")).toList()
+        assertEquals(ChatEventType.DONE, events.last().type)
         assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
     }
 

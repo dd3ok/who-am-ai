@@ -34,8 +34,9 @@ class ChatService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private companion object {
-        const val API_WINDOW_TOKENS = 2048
-        const val PERSISTENCE_WINDOW_TOKENS = 8192
+        // The character-based estimate is conservative; retain the user turn preceding an 8K-token answer.
+        const val API_WINDOW_TOKENS = 65536
+        const val PERSISTENCE_WINDOW_TOKENS = 131072
     }
 
     override suspend fun streamChatResponse(message: StreamMessage): Flow<String> =

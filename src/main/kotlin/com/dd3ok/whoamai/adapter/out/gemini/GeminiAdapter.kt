@@ -17,7 +17,7 @@ import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
-import org.springframework.ai.google.genai.GoogleGenAiChatOptions
+import org.springframework.ai.openai.OpenAiChatOptions
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -38,11 +38,11 @@ class GeminiAdapter(
         return streamWithPriorities(messages)
     }
 
-    private fun buildChatOptions(model: String): GoogleGenAiChatOptions {
-        return GoogleGenAiChatOptions.builder()
+    private fun buildChatOptions(model: String): OpenAiChatOptions {
+        return OpenAiChatOptions.builder()
             .model(model)
             .temperature(chatModelProperties.temperature.toDouble())
-            .maxOutputTokens(chatModelProperties.maxOutputTokens)
+            .maxTokens(chatModelProperties.maxOutputTokens)
             .build()
     }
 
