@@ -11,7 +11,10 @@ class WebSocketConfig {
 
     @Bean
     fun webSocketHandlerMapping(streamChatWebSocketHandler: StreamChatWebSocketHandler): HandlerMapping {
-        val map = mapOf("/ws/chat" to streamChatWebSocketHandler)
+        val map = mapOf(
+            "/ws/chat" to streamChatWebSocketHandler,
+            "/ws/chat/events" to streamChatWebSocketHandler
+        )
         return SimpleUrlHandlerMapping(map).apply { order = 1 }
     }
 }

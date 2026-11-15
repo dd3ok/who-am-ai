@@ -22,7 +22,8 @@ class ContextRetriever(
     private val resumePersistencePort: ResumePersistencePort,
     private val resumeProviderPort: ResumeProviderPort,
     private val ownDomainProfileProvider: OwnDomainProfileProvider,
-    @Value("\${rag.search.metadata-filter-enabled:true}") private val metadataFilterEnabled: Boolean
+    @Value("\${rag.search.metadata-filter-enabled:true}") private val metadataFilterEnabled: Boolean,
+    @Value("\${rag.search.similarity-threshold-override:-1}") private val similarityThresholdOverride: Double = -1.0
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val filterExpressionBuilder = FilterExpressionBuilder()
@@ -42,7 +43,7 @@ class ContextRetriever(
             { ctx ->
                 val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
                 val matchesName = NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)
-                if (matchesIntro || (matchesName && !isSpecificResumeSlotQuery(ctx.query))) {
+                if (matchesIntro && matchesName && !isSpecificResumeSlotQuery(ctx.query)) {
                     ChunkIdGenerator.forSummary()
                 } else null
             }
@@ -53,12 +54,15 @@ class ContextRetriever(
      * 규칙 기반으로 컨텍스트를 검색합니다.
      * @return 컨텍스트를 찾으면 List<String>, 못 찾으면 빈 List를 반환합니다.
      */
-    suspend fun retrieveByRule(userPrompt: String): List<String> {
+    suspend fun retrieveByRule(userPrompt: String): List<String> = retrieveSourcesByRule(userPrompt).map { it.content }
+
+    suspend fun retrieveSourcesByRule(userPrompt: String): List<ResumeSearchResult> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = normalizeResumeQuery(userPrompt)
         if (isOwnServiceQuestion(normalizedQuery)) {
             logger.info("Context retrieved by: Own Service Rule.")
-            return listOf(ownDomainProfileProvider.serviceProfile())
+            return listOf(ResumeSearchResult("service_profile", "service", ownDomainProfileProvider.serviceProfile(),
+                "who-am-ai 구현 정보", "https://github.com/dd3ok/who-am-ai"))
         }
         val nameFragments = NameFragmentExtractor.extract(resume.name)
         if (!isLikelyOwnDomainQuestion(userPrompt, normalizedQuery, resume, nameFragments)) {
@@ -67,44 +71,47 @@ class ContextRetriever(
         }
 
         // 1. Specific project title check
-        val matchedProject = resume.projects.find { normalizedQuery.contains(normalizeResumeQuery(it.title)) }
-        if (matchedProject != null) {
-            logger.info("Context retrieved by: Specific Project Rule ('${matchedProject.title}').")
-            val projectId = ChunkIdGenerator.forProject(matchedProject.title)
-            return fetchPlainChunks(listOf(projectId))
-        }
+        val matchedProjects = resume.projects.filter { it.title.isNotBlank() && normalizedQuery.contains(normalizeResumeQuery(it.title)) }
+        val chunkIds = matchedProjects.map { ChunkIdGenerator.forProject(it.title) }.toMutableList()
 
-        val shouldDeferBroadRule = shouldDeferBroadRuleToVector(normalizedQuery, resume)
+        val shouldDeferBroadRule = shouldDeferBroadRuleToVector(userPrompt, resume)
+        val matchedCompanies = resume.experiences.filter { exp ->
+            containsResumeTerm(userPrompt, exp.company) || exp.aliases.any { containsResumeTerm(userPrompt, it) }
+        }
+        val matchedSkills = resume.skills.filter { containsResumeTerm(userPrompt, it) }
 
         // 2. General rule-based check
         val ctx = RuleContext(normalizedQuery, nameFragments)
-        for (rule in rules) {
-            val result = rule(ctx)
-            if (result != null) {
-                if (shouldDeferBroadRule && result in BROAD_RULE_RESULTS) {
-                    logger.info("Broad rule '{}' deferred to vector path because explicit entity hints exist.", result)
-                    continue
-                }
-                logger.info("Context retrieved by: General Rule ('$result').")
-                return when (result) {
-                    "projects" -> fetchPlainChunks(
-                        resume.projects.map { ChunkIdGenerator.forProject(it.title) }
-                    )
-                    "experiences" -> fetchPlainChunks(
-                        resume.experiences.map { ChunkIdGenerator.forExperience(it.company) }
-                    )
-                    else -> fetchPlainChunks(listOf(result))
-                }
+        val matchedRules = rules.mapNotNull { it(ctx) }
+        val compoundSlots = matchedRules.count { it != ChunkIdGenerator.forSummary() } > 1
+        for (result in matchedRules) {
+            if (((shouldDeferBroadRule && !compoundSlots) || matchedProjects.isNotEmpty()) && result in BROAD_RULE_RESULTS) {
+                logger.info("Broad rule '{}' deferred to vector path because explicit entity hints exist.", result)
+                continue
+            }
+            logger.info("Context retrieved by: General Rule ('$result').")
+            chunkIds += when (result) {
+                "projects" -> resume.projects.filter { project ->
+                    (matchedCompanies.isEmpty() || matchedCompanies.any { it.company == project.company }) &&
+                        (matchedSkills.isEmpty() || project.skills.any { it in matchedSkills })
+                }.map { ChunkIdGenerator.forProject(it.title) }
+                "experiences" -> if (ChunkIdGenerator.forTotalExperience() in chunkIds) emptyList()
+                    else matchedCompanies.ifEmpty { resume.experiences }.map { ChunkIdGenerator.forExperience(it.company) }
+                ChunkIdGenerator.forSummary() -> if (chunkIds.isEmpty()) listOf(result) else emptyList()
+                else -> listOf(result)
             }
         }
 
-        return emptyList() // 규칙에 맞는 것이 없으면 빈 리스트 반환
+        return fetchStructuredChunks(chunkIds.distinct()).map(::withSourceDetails)
     }
 
     /**
      * LLM 라우터의 힌트를 바탕으로 벡터 검색을 수행합니다.
      */
-    suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> {
+    suspend fun retrieveByVector(userPrompt: String, routeDecision: RouteDecision): List<String> =
+        retrieveSourcesByVector(userPrompt, routeDecision).map { it.content }
+
+    suspend fun retrieveSourcesByVector(userPrompt: String, routeDecision: RouteDecision): List<ResumeSearchResult> {
         logger.info("No rules matched. Context retrieved by: Vector Search (as per LLMRouter).")
         val precise = retrievePreciseByRouteHints(routeDecision)
         val retrievalProfile = resolveRetrievalProfile(userPrompt, routeDecision)
@@ -132,11 +139,11 @@ class ContextRetriever(
             query = finalQuery,
             topK = retrievalProfile.topK,
             filter = finalFilter,
-            similarityThreshold = retrievalProfile.similarityThreshold
+            similarityThreshold = similarityThresholdOverride.takeIf { it in 0.0..1.0 } ?: retrievalProfile.similarityThreshold
         )
         val blended = (precise + retrieved).distinctBy { it.chunkId }
         return rerankByHeuristic(finalQuery, blended, routeDecision, 4)
-            .map { it.content }
+            .map(::withSourceDetails)
     }
 
     /** 질의 토큰 교집합 + chunk type 가중치 기반 리랭크로 가장 관련도 높은 컨텍스트를 우선 선택한다. */
@@ -231,10 +238,28 @@ class ContextRetriever(
         }
     }
 
-    private suspend fun fetchPlainChunks(chunkIds: List<String>): List<String> {
-        if (chunkIds.isEmpty()) return emptyList()
-        val contents = findContentsByIdsSafely(chunkIds)
-        return chunkIds.mapNotNull(contents::get)
+    private fun withSourceDetails(result: ResumeSearchResult): ResumeSearchResult {
+        val resume = resumeProviderPort.getResume()
+        val project = resume.projects.firstOrNull { ChunkIdGenerator.forProject(it.title) == result.chunkId }
+        val experience = resume.experiences.firstOrNull { ChunkIdGenerator.forExperience(it.company) == result.chunkId }
+        val title = project?.title ?: experience?.let { "${it.company} 경력" } ?: when (result.chunkId) {
+            "summary" -> "프로필 소개"
+            "skills" -> "기술 스택"
+            "education" -> "학력"
+            "certificates" -> "자격증"
+            "recent_activities" -> "최근 활동"
+            "experience_total_summary" -> "총 경력"
+            "interests" -> "관심사"
+            "hobbies" -> "취미"
+            "mbti" -> "성격"
+            else -> result.title
+        }
+        val url = project?.sourceUrl?.takeIf { value ->
+            runCatching { java.net.URI(value) }.getOrNull()?.let {
+                it.scheme in setOf("http", "https") && !it.host.isNullOrBlank() && it.userInfo == null
+            } == true
+        }
+        return result.copy(title = title, url = url)
     }
 
     private suspend fun findContentsByIdsSafely(chunkIds: List<String>): Map<String, String> {
@@ -367,9 +392,10 @@ class ContextRetriever(
     }
 
     private fun shouldDeferBroadRuleToVector(
-        normalizedQuery: String,
+        query: String,
         resume: com.dd3ok.whoamai.domain.Resume
     ): Boolean {
+        val normalizedQuery = normalizeResumeQuery(query)
         val hasBroadRuleKeyword = PROJECT_KEYWORDS.any { normalizedQuery.contains(it) } ||
             EXPERIENCE_KEYWORDS.any { normalizedQuery.contains(it) } ||
             SKILL_KEYWORDS.any { normalizedQuery.contains(it) }
@@ -382,7 +408,7 @@ class ContextRetriever(
             normalizedQuery.contains(normalizeResumeQuery(exp.company)) ||
                 exp.aliases.any { alias -> normalizedQuery.contains(normalizeResumeQuery(alias)) }
         }
-        val hasSkillHint = resume.skills.any { normalizedQuery.contains(normalizeResumeQuery(it)) }
+        val hasSkillHint = resume.skills.any { containsResumeTerm(query, it) }
         val hasProjectHint = resume.projects.any { project ->
             normalizedQuery.contains(normalizeResumeQuery(project.title))
         }
@@ -410,7 +436,7 @@ private data class RuleContext(
 private fun normalizedKeywords(vararg keywords: String): List<String> =
     keywords.map { it.replace(Regex("\\s+"), "").lowercase() }
 
-private val INTRO_KEYWORDS = normalizedKeywords("누구야", "누구세요", "소개", "자기소개", "소개해줘")
+private val INTRO_KEYWORDS = normalizedKeywords("누구야", "누구세요", "소개", "자기소개", "소개해줘", "에 대해 알려")
 private val RECENT_ACTIVITY_KEYWORDS = ResumeIntentKeywords.recentActivity
 private val TOTAL_EXPERIENCE_KEYWORDS = normalizedKeywords("총 경력", "총경력", "전체경력")
 private val PROJECT_KEYWORDS = normalizedKeywords("프로젝트", "project")

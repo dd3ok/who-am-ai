@@ -1,6 +1,11 @@
 package com.dd3ok.whoamai.adapter.`in`.web
 
 import com.dd3ok.whoamai.application.port.`in`.ChatUseCase
+import com.dd3ok.whoamai.application.service.ChatAccessService
+import com.dd3ok.whoamai.application.service.InMemoryChatAccessStore
+import com.dd3ok.whoamai.common.config.ChatAccessProperties
+import kotlinx.coroutines.runBlocking
+import org.mockito.Mockito.mock
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import com.dd3ok.whoamai.domain.StreamMessage
 import tools.jackson.module.kotlin.jacksonObjectMapper
@@ -31,11 +36,12 @@ import java.time.Duration
 import java.util.function.Function
 
 class StreamChatWebSocketHandlerTest {
+    private val accessService = mock(ChatAccessService::class.java)
 
     @Test
     fun `rejects disallowed origin before reading chat messages`() {
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://example.invalid",
             incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
@@ -54,6 +60,7 @@ class StreamChatWebSocketHandlerTest {
         val handler = StreamChatWebSocketHandler(
             chatUseCase = chatUseCase,
             objectMapper = jacksonObjectMapper(),
+            accessService = accessService,
             webSocketProperties = WebSocketProperties(allowedOrigins = listOf("https://preview.example"))
         )
         val session = RecordingWebSocketSession(
@@ -70,7 +77,7 @@ class StreamChatWebSocketHandlerTest {
     @Test
     fun `rejects null origin by default before reading chat messages`() {
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = null,
             incomingPayloads = listOf("""{"uuid":"user-1","type":"USER","content":"hello"}""")
@@ -89,6 +96,7 @@ class StreamChatWebSocketHandlerTest {
         val handler = StreamChatWebSocketHandler(
             chatUseCase = chatUseCase,
             objectMapper = jacksonObjectMapper(),
+            accessService = accessService,
             webSocketProperties = WebSocketProperties(
                 allowedOrigins = listOf("https://preview.example"),
                 allowNullOrigin = true
@@ -108,7 +116,7 @@ class StreamChatWebSocketHandlerTest {
     @Test
     fun `rejects blank uuid message without calling chat use case`() {
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://dd3ok.github.io",
             incomingPayloads = listOf("""{"uuid":" ","type":"USER","content":"hello"}""")
@@ -129,7 +137,7 @@ class StreamChatWebSocketHandlerTest {
 
         invalidPayloads.forEach { payload ->
             val chatUseCase = RecordingChatUseCase()
-            val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+            val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
             val session = RecordingWebSocketSession(
                 origin = "https://dd3ok.github.io",
                 incomingPayloads = listOf(payload)
@@ -145,7 +153,7 @@ class StreamChatWebSocketHandlerTest {
     @Test
     fun `rejects malformed json without calling chat use case`() {
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://dd3ok.github.io",
             incomingPayloads = listOf("{not-json")
@@ -164,6 +172,7 @@ class StreamChatWebSocketHandlerTest {
         val handler = StreamChatWebSocketHandler(
             chatUseCase = chatUseCase,
             objectMapper = objectMapper,
+            accessService = accessService,
             webSocketProperties = WebSocketProperties(responseTimeoutMs = 10)
         )
         val session = RecordingWebSocketSession(
@@ -186,6 +195,7 @@ class StreamChatWebSocketHandlerTest {
         val handler = StreamChatWebSocketHandler(
             chatUseCase = chatUseCase,
             objectMapper = objectMapper,
+            accessService = accessService,
             webSocketProperties = WebSocketProperties(responseTimeoutMs = 10)
         )
         val session = RecordingWebSocketSession(
@@ -204,7 +214,7 @@ class StreamChatWebSocketHandlerTest {
     @Test
     fun `uses a single outbound send stream for multiple client messages`() {
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://dd3ok.github.io",
             incomingPayloads = listOf(
@@ -222,7 +232,7 @@ class StreamChatWebSocketHandlerTest {
     @Test
     fun `processes multiple client messages sequentially even when first response is delayed`() {
         val chatUseCase = DelayedFirstResponseChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://dd3ok.github.io",
             incomingPayloads = listOf(
@@ -244,7 +254,7 @@ class StreamChatWebSocketHandlerTest {
         nativeBuffer.writeBytes("""{"uuid":"user-1","type":"USER","content":"hello"}""".toByteArray(StandardCharsets.UTF_8))
         val payload = nettyFactory.wrap(nativeBuffer)
         val chatUseCase = RecordingChatUseCase()
-        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper())
+        val handler = StreamChatWebSocketHandler(chatUseCase, jacksonObjectMapper(), accessService)
         val session = RecordingWebSocketSession(
             origin = "https://dd3ok.github.io",
             incomingPayloads = emptyList(),
@@ -261,6 +271,107 @@ class StreamChatWebSocketHandlerTest {
                 payload.release()
             }
         }
+    }
+
+    @Test
+    fun `event endpoint sends sources deltas and done with a shared request id`() {
+        val mapper = jacksonObjectMapper()
+        val useCase = object : ChatUseCase {
+            override suspend fun streamChatResponse(message: StreamMessage) = error("Legacy path must not be used")
+            override suspend fun streamChatEvents(message: StreamMessage) = flowOf(
+                com.dd3ok.whoamai.domain.ChatEvent(com.dd3ok.whoamai.domain.ChatEventType.SOURCES,
+                    sources = listOf(com.dd3ok.whoamai.domain.ChatSource("project_1", "프로젝트"))),
+                com.dd3ok.whoamai.domain.ChatEvent(com.dd3ok.whoamai.domain.ChatEventType.DELTA, content = "답변"),
+                com.dd3ok.whoamai.domain.ChatEvent(com.dd3ok.whoamai.domain.ChatEventType.DONE)
+            )
+        }
+        val session = RecordingWebSocketSession("https://dd3ok.github.io",
+            listOf("""{"uuid":"user-1","type":"USER","content":"질문"}"""), path = "/ws/chat/events")
+
+        StreamChatWebSocketHandler(useCase, mapper, accessService).handle(session).block(Duration.ofSeconds(1))
+
+        val events = session.sentPayloads.map { mapper.readTree(it) }
+        assertEquals(listOf("SOURCES", "DELTA", "DONE"), events.map { it["type"].asText() })
+        assertEquals("project_1", events.first()["sources"][0]["id"].asText())
+        assertEquals(1, events.map { it["requestId"].asText() }.distinct().size)
+        assertTrue(events.first()["requestId"].asText().isNotBlank())
+    }
+
+    @Test
+    fun `event stream reports partial failure without a done event`() {
+        val mapper = jacksonObjectMapper()
+        val useCase = object : ChatUseCase {
+            override suspend fun streamChatResponse(message: StreamMessage): Flow<String> = flow {
+                emit("일부 응답")
+                throw IllegalStateException("internal failure")
+            }
+        }
+        val session = RecordingWebSocketSession("https://dd3ok.github.io",
+            listOf("""{"uuid":"user-1","type":"USER","content":"질문"}"""), path = "/ws/chat/events")
+
+        StreamChatWebSocketHandler(useCase, mapper, accessService).handle(session).block(Duration.ofSeconds(1))
+
+        val events = session.sentPayloads.map { mapper.readTree(it) }
+        assertEquals(listOf("DELTA", "ERROR"), events.map { it["type"].asText() })
+        assertEquals("TEMPORARY_ERROR", events.last()["code"].asText())
+        assertEquals(events.first()["requestId"], events.last()["requestId"])
+        assertTrue(!session.sentPayloads.last().contains("internal failure"))
+    }
+
+    @Test
+    fun `request deadline returns a timeout event`() {
+        val mapper = jacksonObjectMapper()
+        val session = RecordingWebSocketSession("https://dd3ok.github.io",
+            listOf("""{"uuid":"user-1","type":"USER","content":"질문"}"""), path = "/ws/chat/events")
+        StreamChatWebSocketHandler(DelayedFirstResponseChatUseCase(), mapper, accessService,
+            WebSocketProperties(responseTimeoutMs = 10)).handle(session).block(Duration.ofSeconds(1))
+        val event = mapper.readTree(session.sentPayloads.single())
+        assertEquals("ERROR", event["type"].asText())
+        assertEquals("TIMEOUT", event["code"].asText())
+    }
+
+    @Test
+    fun `rejects oversized content uuid and frame before invoking the model`() {
+        val mapper = jacksonObjectMapper()
+        val cases = listOf(
+            WebSocketProperties(maxContentLength = 3) to "hello",
+            WebSocketProperties(maxUuidLength = 3) to "hi",
+            WebSocketProperties(maxMessageBytes = 10) to "hi"
+        )
+        cases.forEach { (properties, content) ->
+            val useCase = RecordingChatUseCase()
+            val session = RecordingWebSocketSession("https://dd3ok.github.io",
+                listOf(mapper.writeValueAsString(StreamMessage("user-1", com.dd3ok.whoamai.domain.MessageType.USER, content))))
+            StreamChatWebSocketHandler(useCase, mapper, accessService, properties).handle(session).block(Duration.ofSeconds(1))
+            assertTrue(useCase.messages.isEmpty())
+            val error = mapper.readValue<WebSocketErrorPayload>(session.sentPayloads.single())
+            assertEquals("ERROR", error.type)
+            assertEquals("INVALID_MESSAGE", error.code)
+            assertEquals("Invalid chat message.", error.message)
+        }
+    }
+
+    @Test
+    fun `both transports reject unowned history and enforce quota across connections`() = runBlocking {
+        val access = ChatAccessService(InMemoryChatAccessStore(), ChatAccessProperties(messagesPerSessionPerMinute = 1))
+        val grant = access.issueSession("unknown")
+        val mapper = jacksonObjectMapper()
+        val useCase = RecordingChatUseCase()
+        val handler = StreamChatWebSocketHandler(useCase, mapper, access)
+        fun send(path: String, uuid: String = grant.conversationId, token: String? = grant.sessionToken): RecordingWebSocketSession {
+            val payload = mapper.writeValueAsString(StreamMessage(uuid, com.dd3ok.whoamai.domain.MessageType.USER, "hello", token))
+            return RecordingWebSocketSession("https://dd3ok.github.io", listOf(payload), path = path).also {
+                handler.handle(it).block(Duration.ofSeconds(1))
+            }
+        }
+        assertTrue(send("/ws/chat", token = null).sentPayloads.single().contains("session"))
+        assertEquals("SESSION_REQUIRED", mapper.readTree(send("/ws/chat/events", uuid = "victim").sentPayloads.single())["code"].asText())
+        assertTrue(useCase.messages.isEmpty())
+        send("/ws/chat/events")
+        assertEquals(1, useCase.messages.size)
+        assertEquals(null, useCase.messages.single().sessionToken)
+        assertEquals("RATE_LIMITED", mapper.readTree(send("/ws/chat/events").sentPayloads.single())["code"].asText())
+        assertEquals(1, useCase.messages.size)
     }
 
     private class RecordingChatUseCase : ChatUseCase {
@@ -298,7 +409,8 @@ class StreamChatWebSocketHandlerTest {
     private class RecordingWebSocketSession(
         origin: String?,
         incomingPayloads: List<String>,
-        providedIncomingMessages: List<WebSocketMessage>? = null
+        providedIncomingMessages: List<WebSocketMessage>? = null,
+        private val path: String = "/ws/chat"
     ) : WebSocketSession {
         private val dataBufferFactory = DefaultDataBufferFactory()
         private val headers = HttpHeaders()
@@ -315,7 +427,7 @@ class StreamChatWebSocketHandlerTest {
         override fun getId(): String = "test-session"
 
         override fun getHandshakeInfo(): HandshakeInfo =
-            HandshakeInfo(URI.create("ws://localhost/ws/chat"), headers, Mono.empty(), null)
+            HandshakeInfo(URI.create("ws://localhost$path"), headers, Mono.empty(), null)
 
         override fun bufferFactory(): DataBufferFactory = dataBufferFactory
 

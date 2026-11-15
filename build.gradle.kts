@@ -58,6 +58,37 @@ kotlin {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Gradle's JVM properties are not automatically passed to the forked test JVM.
+    systemProperties(System.getProperties().entries
+        .filter { it.key.toString().startsWith("benchmark.") || it.key.toString().startsWith("rag.search.") }
+        .associate { it.key.toString() to it.value })
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform { excludeTags("live", "mongo") }
+}
+
+tasks.register<Test>("mongoTest") {
+    description = "Tests atomic persistence against a local MongoDB server, without Gemini or Atlas."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("mongo") }
+    outputs.upToDateWhen { false }
+    doFirst { require(!System.getenv("TEST_MONGO_URI").isNullOrBlank()) { "Set TEST_MONGO_URI to a local MongoDB server." } }
+}
+
+tasks.register<Test>("liveEval") {
+    description = "Runs opt-in Gemini / MongoDB evaluations against EVAL_MONGO_URI. Reindexes the evaluation database."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("live") }
+    outputs.upToDateWhen { false }
+    doFirst {
+        require(!System.getenv("EVAL_MONGO_URI").isNullOrBlank()) { "Set EVAL_MONGO_URI to a dedicated evaluation database." }
+        require(!System.getenv("GEMINI_API_KEY").isNullOrBlank()) { "GEMINI_API_KEY is required for live evaluations." }
+    }
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {

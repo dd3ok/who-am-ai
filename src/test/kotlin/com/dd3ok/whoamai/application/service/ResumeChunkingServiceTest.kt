@@ -88,6 +88,43 @@ class ResumeChunkingServiceTest {
         assertEquals("conversion failed", error.message)
     }
 
+    @Test
+    fun `project evidence is included without requiring it on old records`() {
+        val project = Project(
+            title = "정산", problem = "플랫폼별 정책 차이",
+            contribution = "전략 패턴으로 정책 분리", outcome = "응답 개선, 정량 수치 미기록"
+        )
+        val content = service.generateChunks(Resume(projects = listOf(project))).first { it.type == "project" }.content
+        assertTrue(content.contains("해결할 문제: 플랫폼별 정책 차이"))
+        assertTrue(content.contains("본인 기여: 전략 패턴으로 정책 분리"))
+        assertTrue(content.contains("확인된 결과: 응답 개선, 정량 수치 미기록"))
+        val oldProject = jacksonObjectMapper().readValue("""{"title":"기존 프로젝트"}""", Project::class.java)
+        assertEquals("", oldProject.contribution)
+    }
+
+    @Test
+    fun `total experience counts shared months once and excludes gaps`() {
+        val resume = Resume(experiences = listOf(
+            Experience(company = "A", period = Period("2020-01", "2020-03")),
+            Experience(company = "B", period = Period("2020-03", "2020-04")),
+            Experience(company = "C", period = Period("2020-07", "2020-08"))
+        ))
+        val content = service.generateChunks(resume).first { it.id == ChunkIdGenerator.forTotalExperience() }.content
+        assertTrue(content.contains("0년 6개월"))
+        assertTrue(content.contains("입사월과 퇴사월을 포함"))
+    }
+
+    @Test
+    fun `invalid experience dates do not produce a misleading partial total`() {
+        val resume = Resume(experiences = listOf(
+            Experience(company = "A", period = Period("2020-01", "2020-03")),
+            Experience(company = "B", period = Period("2021-01", ""))
+        ))
+        val content = service.generateChunks(resume).first { it.id == ChunkIdGenerator.forTotalExperience() }.content
+        assertTrue(content.contains("날짜 정보가 부족합니다"))
+        org.junit.jupiter.api.Assertions.assertFalse(content.contains("총 경력은"))
+    }
+
     private class FailingObjectMapper : ObjectMapper() {
         override fun <T> convertValue(fromValue: Any?, toValueRef: TypeReference<T>): T {
             throw IllegalArgumentException("conversion failed")

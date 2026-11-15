@@ -10,7 +10,9 @@ class CareerPromptAssembler(
 ) {
     fun assemble(input: CareerPromptInput): List<ChatMessage> {
         val finalUserPrompt = if (input.useRagPrompt) {
-            val context = if (input.contexts.isNotEmpty()) {
+            val context = if (input.sources.isNotEmpty()) {
+                input.sources.joinToString("\n---\n") { "[자료: ${it.title} / ${it.chunkId}]\n${it.content}" }
+            } else if (input.contexts.isNotEmpty()) {
                 input.contexts.joinToString("\n---\n")
             } else {
                 "관련 정보 없음"

@@ -52,9 +52,20 @@ management:
 admin:
   api-key: ${ADMIN_API_KEY:}
 
+chat-access:
+  session-lifetime-seconds: 86400
+  sessions-per-ip-per-minute: 5
+  sessions-per-minute: 60
+  messages-per-session-per-minute: 10
+  messages-per-ip-per-minute: 30
+  messages-per-minute: 120
+
 websocket:
   allow-null-origin: false
-  response-timeout-ms: 30000
+  max-message-bytes: 65536
+  max-content-length: 4000
+  max-uuid-length: 128
+  response-timeout-ms: 45000
   allowed-origins:
     - https://dd3ok.github.io
     - http://localhost:3000

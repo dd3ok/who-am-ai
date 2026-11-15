@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
@@ -14,12 +15,13 @@ import org.springframework.core.io.ClassPathResource
 
 @SpringBootTest(
     properties = [
-        "spring.mongodb.uri=\${MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
+        "spring.mongodb.uri=\${EVAL_MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
         "spring.ai.google.genai.api-key=\${GEMINI_API_KEY:test-key}",
         "spring.ai.google.genai.embedding.api-key=\${GEMINI_API_KEY:test-key}"
     ]
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Tag("live")
 class RagRetrievalThresholdBenchmarkTest {
 
     @Autowired
@@ -31,13 +33,13 @@ class RagRetrievalThresholdBenchmarkTest {
     @Autowired
     private lateinit var contextRetriever: ContextRetriever
 
-    @Value("\${rag.search.similarity-threshold}")
-    private var similarityThreshold: Double = 0.65
+    @Value("\${rag.search.similarity-threshold-override:-1}")
+    private var similarityThreshold: Double = -1.0
 
     @BeforeAll
     fun warmup() = runBlocking {
         assumeTrue(!System.getenv("GEMINI_API_KEY").isNullOrBlank(), "GEMINI_API_KEY is required")
-        assumeTrue(!System.getenv("MONGO_URI").isNullOrBlank(), "MONGO_URI is required")
+        assumeTrue(!System.getenv("EVAL_MONGO_URI").isNullOrBlank(), "EVAL_MONGO_URI is required")
         val result = manageResumeUseCase.reindexResumeData()
         println("RETRIEVAL_BENCHMARK|phase=reindex|result=$result")
     }
@@ -97,9 +99,7 @@ class RagRetrievalThresholdBenchmarkTest {
     }
 
     private fun benchmarkThresholdLabel(): String {
-        return System.getProperty("benchmark.threshold")
-            ?: System.getenv("BENCHMARK_THRESHOLD")
-            ?: similarityThreshold.toString()
+        return similarityThreshold.takeIf { it in 0.0..1.0 }?.toString() ?: "adaptive"
     }
 
     private fun benchmarkMaxPrompts(): Int {

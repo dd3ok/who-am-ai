@@ -18,19 +18,20 @@ class CareerContextPlanner(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     suspend fun plan(userPrompt: String, history: List<ChatMessage>): CareerContextPlan {
-        var contexts = recordSuspendTimer("whoamai.chat.rag.rule.duration") {
-            contextRetriever.retrieveByRule(userPrompt)
+        val retrievalPrompt = llmRouter.resolveQuery(userPrompt, history)
+        var sources = recordSuspendTimer("whoamai.chat.rag.rule.duration") {
+            contextRetriever.retrieveSourcesByRule(retrievalPrompt)
         }
-        var resumeQuestionDetected = contexts.isNotEmpty()
-        var retrievalPath = if (contexts.isNotEmpty()) "rule" else "unknown"
+        var resumeQuestionDetected = sources.isNotEmpty()
+        var retrievalPath = if (sources.isNotEmpty()) "rule" else "unknown"
 
-        if (contexts.isEmpty()) {
-            val routeDecision = llmRouter.route(userPrompt, history)
+        if (sources.isEmpty()) {
+            val routeDecision = llmRouter.route(retrievalPrompt)
             logger.info("No rule match. LLM Router hint: {}", routeDecision)
             if (routeDecision.queryType == QueryType.RESUME_RAG) {
                 resumeQuestionDetected = true
-                contexts = recordSuspendTimer("whoamai.chat.rag.vector.duration") {
-                    contextRetriever.retrieveByVector(userPrompt, routeDecision)
+                sources = recordSuspendTimer("whoamai.chat.rag.vector.duration") {
+                    contextRetriever.retrieveSourcesByVector(retrievalPrompt, routeDecision)
                 }
                 retrievalPath = "vector"
             } else {
@@ -38,16 +39,17 @@ class CareerContextPlanner(
             }
         }
 
-        if (contexts.isEmpty() && resumeQuestionDetected) {
+        if (sources.isEmpty() && resumeQuestionDetected) {
             retrievalPath = "rag_empty"
         }
 
         return CareerContextPlan(
             prompt = CareerPromptInput(
                 history = history,
-                userPrompt = userPrompt,
-                contexts = contexts,
-                useRagPrompt = contexts.isNotEmpty() || resumeQuestionDetected
+                userPrompt = if (sources.isNotEmpty() || resumeQuestionDetected) retrievalPrompt else userPrompt,
+                contexts = sources.map { it.content },
+                useRagPrompt = sources.isNotEmpty() || resumeQuestionDetected,
+                sources = sources
             ),
             retrieval = CareerRetrievalSummary(
                 retrievalPath = retrievalPath,

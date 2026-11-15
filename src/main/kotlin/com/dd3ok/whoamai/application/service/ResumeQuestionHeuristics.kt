@@ -8,6 +8,17 @@ internal fun normalizeResumeQuery(text: String): String =
         .replace(Regex("\\s+"), "")
         .replace(Regex("[^\\p{L}\\p{Nd}]"), "")
 
+/** Keep Latin word boundaries: .NET must not match Kubernetes, nor Java match JavaScript. */
+internal fun containsResumeTerm(query: String, term: String): Boolean {
+    if (term.isBlank()) return false
+    if (term.none { it.lowercaseChar() in 'a'..'z' }) {
+        return normalizeResumeQuery(query).contains(normalizeResumeQuery(term))
+    }
+    val pattern = Regex("[\\p{L}\\p{Nd}]+").findAll(term.lowercase())
+        .joinToString("[\\s._-]*") { Regex.escape(it.value) }
+    return pattern.isNotEmpty() && Regex("(?<![a-z])$pattern(?![a-z])", RegexOption.IGNORE_CASE).containsMatchIn(query)
+}
+
 internal fun isLikelyOwnDomainQuestion(
     rawPrompt: String,
     normalizedPrompt: String,
@@ -43,21 +54,30 @@ private fun isLikelyResumeQuestion(
     val hasNamedTarget = NameFragmentExtractor.matches(normalizedPrompt, nameFragments)
     val hasDirectTarget = hasNamedTarget ||
         DIRECT_TARGET_TOKENS.any { normalizedPrompt.contains(it) }
-    val hasResumeEntity = hasResumeEntityHit(normalizedPrompt, resume)
+    val hasResumeEntity = hasResumeEntityHit(rawPrompt, resume)
+    val hasOwnWorkTarget = resume.experiences.any { exp ->
+        containsResumeTerm(rawPrompt, exp.company) || exp.aliases.any { containsResumeTerm(rawPrompt, it) }
+    } || resume.projects.any { containsResumeTerm(rawPrompt, it.title) }
     val hasExternalSubject = hasExternalNamedSubject(rawPrompt, nameFragments)
     val hasSelfContainedProfileSignal = SELF_CONTAINED_PROFILE_KEYWORDS.any { normalizedPrompt.contains(it) }
     val hasBroadCapabilitySignal = BROAD_CAPABILITY_KEYWORDS.any { normalizedPrompt.contains(it) }
+    val hasProfileCapabilitySignal = listOf("강점", "성과", "경험", "협업방식").any { normalizedPrompt.contains(it) } &&
+        !listOf("공부", "작성", "추천", "방법").any { normalizedPrompt.contains(it) }
     val hasDocumentSignal = DOCUMENT_SIGNAL_KEYWORDS.any { normalizedPrompt.contains(it) }
     val hasTargetedIntroSignal = hasNamedTarget &&
         TARGETED_INTRO_PATTERNS.any { normalizedPrompt.contains(it) }
 
-    if (hasExternalSubject && !hasResumeEntity) {
+    if (hasExternalSubject && !hasOwnWorkTarget) {
         return false
     }
+    if (!hasDirectTarget && !hasOwnWorkTarget &&
+        listOf("공부", "작성", "추천", "방법").any { normalizedPrompt.contains(it) }
+    ) return false
 
     return hasResumeEntity ||
         (hasSelfContainedProfileSignal && !hasExternalSubject) ||
         hasTargetedIntroSignal ||
+        (hasProfileCapabilitySignal && !hasExternalSubject) ||
         (hasBroadCapabilitySignal && (hasDirectTarget || hasResumeEntity)) ||
         (hasDocumentSignal && (hasDirectTarget || hasResumeEntity))
 }
@@ -71,32 +91,34 @@ private fun looksLikeQuestionOrRequest(rawPrompt: String, normalizedPrompt: Stri
         QUESTION_OR_REQUEST_CONTAINS.any { normalizedPrompt.contains(it) }
 }
 
-private fun hasResumeEntityHit(normalizedPrompt: String, resume: Resume): Boolean {
+private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
     val experienceHit = resume.experiences.any { exp ->
-        normalizedPrompt.contains(normalizeResumeQuery(exp.company)) ||
-            exp.aliases.any { alias -> normalizedPrompt.contains(normalizeResumeQuery(alias)) }
+        containsResumeTerm(rawPrompt, exp.company) ||
+            exp.aliases.any { alias -> containsResumeTerm(rawPrompt, alias) }
     }
     if (experienceHit) return true
 
     val projectHit = resume.projects.any { project ->
-        normalizedPrompt.contains(normalizeResumeQuery(project.title)) ||
-            normalizedPrompt.contains(normalizeResumeQuery(project.company)) ||
-            project.skills.any { skill -> normalizedPrompt.contains(normalizeResumeQuery(skill)) } ||
-            project.tags.any { tag -> normalizedPrompt.contains(normalizeResumeQuery(tag)) }
+        containsResumeTerm(rawPrompt, project.title) ||
+            containsResumeTerm(rawPrompt, project.company) ||
+            project.skills.any { skill -> containsResumeTerm(rawPrompt, skill) } ||
+            project.tags.any { tag -> containsResumeTerm(rawPrompt, tag) }
     }
     if (projectHit) return true
 
-    val skillHit = resume.skills.any { normalizedPrompt.contains(normalizeResumeQuery(it)) }
+    val skillHit = resume.skills.any { containsResumeTerm(rawPrompt, it) }
     if (skillHit) return true
 
     return resume.education.any { edu ->
-        normalizedPrompt.contains(normalizeResumeQuery(edu.school)) ||
-            normalizedPrompt.contains(normalizeResumeQuery(edu.major))
+        containsResumeTerm(rawPrompt, edu.school) ||
+            containsResumeTerm(rawPrompt, edu.major)
     }
 }
 
-private fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String>): Boolean {
-    val trimmed = rawPrompt.trim()
+internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String>): Boolean {
+    val trimmed = stripConversationTransition(rawPrompt)
+    // References such as "결과는?" do not name a new external subject.
+    if (isFollowUpQuestion(trimmed)) return false
     val match = Regex("^([\\p{L}\\p{Nd}\\-+.]+?)(은|는|이|가)").find(trimmed) ?: return false
     val subject = normalizeResumeQuery(match.groupValues[1])
         .removeSuffix(normalizeResumeQuery("님"))
@@ -111,6 +133,26 @@ private fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String
     if (BROAD_CAPABILITY_KEYWORDS.any { subject.contains(it) }) return false
     return true
 }
+
+internal fun isFollowUpQuestion(prompt: String): Boolean {
+    // A transition word alone does not refer back to the previous project or company.
+    val normalized = normalizeResumeQuery(stripConversationTransition(prompt))
+    if (listOf(
+        "거기", "그프로젝트", "그회사", "그때", "그중", "왜그렇게", "왜그걸",
+        "더자세", "조금더", "자세히"
+    ).any { normalized.startsWith(it) } ||
+        Regex("^(?:어떤|무슨)?(?:성과|역할|결과|이유)(?:은|는|이|가|을|를|도|$)").containsMatchIn(normalized)
+    ) return true
+
+    // Omitted subjects can still refer to work already discussed; general advice starts a new topic.
+    return Regex(
+        "^(?:(?:사용|활용|도입)(?:한|했던)(?:기술|스택|도구)|(?:가장|제일)?어려웠던(?:점|부분))"
+    ).containsMatchIn(normalized) &&
+        !listOf("공부", "작성", "추천").any { normalized.contains(it) }
+}
+
+private fun stripConversationTransition(prompt: String): String =
+    prompt.trim().replace(Regex("^(?:(?:그래서|그럼)[\\s,，]*)+"), "")
 
 private val DIRECT_TARGET_TOKENS = listOf(
     "너", "넌", "너의", "니", "니가", "당신"

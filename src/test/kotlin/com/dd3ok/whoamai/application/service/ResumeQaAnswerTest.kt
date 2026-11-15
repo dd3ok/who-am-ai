@@ -10,6 +10,8 @@ import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -17,12 +19,13 @@ import org.springframework.core.io.ClassPathResource
 
 @SpringBootTest(
     properties = [
-        "spring.mongodb.uri=\${MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
+        "spring.mongodb.uri=\${EVAL_MONGO_URI:mongodb://localhost:27017/whoam_ai_benchmark}",
         "spring.ai.google.genai.api-key=\${GEMINI_API_KEY:test-key}",
         "spring.ai.google.genai.embedding.api-key=\${GEMINI_API_KEY:test-key}"
     ]
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Tag("live")
 class ResumeQaAnswerTest {
 
     @Autowired
@@ -34,7 +37,7 @@ class ResumeQaAnswerTest {
     @BeforeAll
     fun warmup() = runBlocking {
         assumeTrue(!System.getenv("GEMINI_API_KEY").isNullOrBlank(), "GEMINI_API_KEY is required")
-        assumeTrue(!System.getenv("MONGO_URI").isNullOrBlank(), "MONGO_URI is required")
+        assumeTrue(!System.getenv("EVAL_MONGO_URI").isNullOrBlank(), "EVAL_MONGO_URI is required")
         val result = manageResumeUseCase.reindexResumeData()
         println("RESUME_QA|phase=reindex|result=$result")
     }
@@ -51,6 +54,7 @@ class ResumeQaAnswerTest {
         val maxPrompts = benchmarkMaxPrompts()
         val timeoutMs = benchmarkPromptTimeoutMs()
 
+        val failures = mutableListOf<String>()
         prompts.take(maxPrompts).forEachIndexed { index, prompt ->
             try {
                 val uuid = "resume-qa-${System.currentTimeMillis()}-$index"
@@ -60,13 +64,16 @@ class ResumeQaAnswerTest {
                     ).toList().joinToString("")
                 }
 
+                assertTrue(answer.isNotBlank(), "Empty answer for prompt $index")
                 println("RESUME_QA|idx=$index|q=${sanitize(prompt)}|a=${sanitize(answer)}")
             } catch (e: Exception) {
+                failures += "prompt $index: ${e::class.java.simpleName}"
                 println(
                     "RESUME_QA_ERROR|idx=$index|q=${sanitize(prompt)}|error=${sanitize(e.message ?: e::class.java.simpleName)}"
                 )
             }
         }
+        assertTrue(failures.isEmpty(), "Live QA failures: ${failures.joinToString()}")
     }
 
     private fun sanitize(text: String): String = text.replace("|", "/").replace("\n", " ").trim()
