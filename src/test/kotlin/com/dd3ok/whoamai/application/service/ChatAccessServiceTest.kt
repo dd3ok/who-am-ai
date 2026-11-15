@@ -51,15 +51,6 @@ class ChatAccessServiceTest {
         }.code)
     }
 
-    // These scenarios stay within one quota window, even if the wall clock crosses a minute boundary.
-    private fun fixedWindowStore(): ChatAccessStore {
-        val store = InMemoryChatAccessStore()
-        return object : ChatAccessStore by store {
-            override suspend fun incrementRequestCount(key: String, expiresAt: Instant) =
-                store.incrementRequestCount(key.substringBeforeLast(':'), expiresAt)
-        }
-    }
-
     @Test
     fun `token is hashed at rest and bound to an unexpired conversation`() = runTest {
         val store = InMemoryChatAccessStore()
@@ -100,6 +91,15 @@ class ChatAccessServiceTest {
         assertFailsWith<ChatAccessException> { service.issueSession("ip") }
         service.authorize(a.conversationId, a.sessionToken, "ip")
         assertEquals("RATE_LIMITED", assertFailsWith<ChatAccessException> { service.authorize(b.conversationId, b.sessionToken, "ip") }.code)
+    }
+}
+
+// Same-window quota scenarios must not depend on crossing a wall-clock minute during execution.
+internal fun fixedWindowStore(): ChatAccessStore {
+    val store = InMemoryChatAccessStore()
+    return object : ChatAccessStore by store {
+        override suspend fun incrementRequestCount(key: String, expiresAt: Instant) =
+            store.incrementRequestCount(key.substringBeforeLast(':'), expiresAt)
     }
 }
 

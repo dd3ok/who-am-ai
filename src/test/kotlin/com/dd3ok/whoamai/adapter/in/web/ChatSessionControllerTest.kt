@@ -1,7 +1,7 @@
 package com.dd3ok.whoamai.adapter.`in`.web
 
 import com.dd3ok.whoamai.application.service.ChatAccessService
-import com.dd3ok.whoamai.application.service.InMemoryChatAccessStore
+import com.dd3ok.whoamai.application.service.fixedWindowStore
 import com.dd3ok.whoamai.common.config.ChatAccessProperties
 import com.dd3ok.whoamai.common.config.WebSocketProperties
 import org.junit.jupiter.api.Test
@@ -10,7 +10,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 class ChatSessionControllerTest {
     @Test
     fun `session issuance rejects foreign origins and applies no store and rate limits`() {
-        val controller = ChatSessionController(ChatAccessService(InMemoryChatAccessStore(),
+        val controller = ChatSessionController(ChatAccessService(fixedWindowStore(),
             ChatAccessProperties(sessionsPerIpPerMinute = 1)), WebSocketProperties())
         val client = WebTestClient.bindToController(controller).build()
         client.post().uri("/api/chat/sessions").exchange().expectStatus().isForbidden
