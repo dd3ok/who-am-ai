@@ -60,7 +60,7 @@ tasks.withType<Test> {
     useJUnitPlatform()
     // Gradle's JVM properties are not automatically passed to the forked test JVM.
     systemProperties(System.getProperties().entries
-        .filter { it.key.toString().startsWith("benchmark.") || it.key.toString().startsWith("rag.search.") }
+        .filter { it.key.toString().startsWith("rag.search.") }
         .associate { it.key.toString() to it.value })
 }
 
@@ -79,7 +79,7 @@ tasks.register<Test>("mongoTest") {
 }
 
 tasks.register<Test>("liveEval") {
-    description = "Runs opt-in chat / Gemini embedding / MongoDB evaluations against EVAL_MONGO_URI. Reindexes the evaluation database."
+    description = "Evaluates retrieval and Gemini-judged answers in a fresh disposable EVAL_MONGO_URI database, then removes it."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath

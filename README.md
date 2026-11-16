@@ -294,41 +294,33 @@ CI runs it against a MongoDB service container alongside the build and Docker pa
 
 `GeminiEmbeddingCompatibilityTest` exercises the configured MongoDB VectorStore, Spring AI and Google SDK against a local HTTP server. It checks Embedding 2 / 768 dimensions, omitted task-type fields, separate vectors for each document, document/query prefixes and unmodified stored/source text.
 
-Live tests require `EVAL_MONGO_URI` pointing to a **dedicated evaluation database** and `GEMINI_API_KEY`.
-An optional `GEMINI_EMBEDDING_API_KEY` overrides the key used for embeddings only.
-They reindex that evaluation database and use paid/quota-limited API calls. Review emitted answers for factual accuracy;
-request errors and blank responses fail the run. Keep prompt counts low:
+`liveEval`은 `CareerAgentLiveEvalTest` 하나로 검색·색인과 답변 품질을 검증합니다. `GEMINI_API_KEY`와 **새로 만든 일회용 Atlas DB** `whoamai_embedding2_eval_<고유 영숫자 접미사>`를 가리키는 `EVAL_MONGO_URI`가 필요합니다. 임베딩에만 다른 키를 쓰려면 `GEMINI_EMBEDDING_API_KEY`를 지정합니다.
+이 검사는 기존 데이터가 있는 DB를 거부하고, 자신이 사용한 평가 DB만 종료 시 삭제합니다. 운영 DB를 지정하지 않습니다. Gemini 호출에는 비용·할당량이 사용됩니다.
 
 ```bash
-BENCHMARK_MAX_PROMPTS=5 ./scripts/run-threshold-benchmark.sh
-./gradlew liveEval --tests "*ResumeQaAnswerTest" -Dbenchmark.max-prompts=5
+./gradlew liveEval
 ```
 
-Embedding 2의 실제 전환 검증은 **새로 만든 일회용 DB** `whoamai_embedding2_eval_<고유 영숫자 접미사>`를 `EVAL_MONGO_URI`에 지정해 실행합니다. 이 검사는 비어 있지 않은 DB를 거부하고, 평가 종료 시 자신이 사용한 DB를 삭제합니다.
+1. 실제 이력서를 색인하고 문서별 768차원·정규화·원문 보존과 Atlas 인덱스를 확인합니다. 한국어 검색 30건의 기대 자료가 상위 3개 안에 들어야 합니다. 이 검사는 규칙 검색을 우회해 임베딩 검색 순위를 측정합니다.
+2. 평가용 Gemini를 정상 답변 3개, 오답 5개, 근거 부족 1개로 먼저 검증합니다. 기대 판정은 모델 입력에 포함하지 않습니다. 이 기준 사례를 모두 구분해야 실제 답변 평가를 진행합니다.
+3. 후속 질문·주제 변경·허위 전제·근무 기간·서비스 RAG·벡터 검색 경로의 실제 답변 9개를 평가합니다. 출처, 응답 완료, 빈 응답 여부는 객관적으로 검사하고, 내용은 별도 Gemini 요청으로 판정합니다.
 
-```bash
-./gradlew liveEval --tests "*Embedding2RetrievalEvalTest"
-```
+평가기 `GeminiAnswerJudge`는 테스트 소스에만 존재하며 기존 `StreamingChatModel` 연결과 Gemini 모델·추론 설정을 재사용합니다. 포트폴리오 답변용 시스템 프롬프트 대신 평가 전용 프롬프트를 사용합니다. 원문 자료, 질문·대화 이력, 실제 모델에 전달된 검색 문맥과 답변을 비교하여 `PASS` / `FAIL` / `REVIEW`, 이유, 문제 문장과 원문 근거를 반환합니다. [Gemini의 구조화 출력](https://ai.google.dev/gemini-api/docs/openai#structured-output)에 JSON 스키마를 전달하고 반환값과 인용을 다시 검증합니다. `REVIEW`, API 오류·시간 초과·잘못된 JSON·검증 불가능한 인용은 통과로 취급하지 않습니다.
 
-실제 이력서 색인, 문서별 768차원·정규화·원문 보존, Atlas 인덱스 준비, 한국어 질문 30개의 상위 3개 결과 내 정답 자료 포함 여부, 실제 Gemini 채팅의 프로젝트 후속 질문을 확인합니다. 검색 모델 평가는 규칙 검색을 우회하며, 점수는 `build/reports/embedding2-retrieval-eval.json`에 기록합니다. 결과는 이 평가 자료에 한정되며 모든 질문의 답변 정확도를 보장하지 않습니다.
+검색 결과는 `build/reports/embedding2-retrieval-eval.json`, 평가 입력·판정·근거는 `build/reports/answer-quality-eval.json`에 기록합니다. 답변별 `objectiveChecks`와 `judgement`를 함께 확인합니다. 출처 누락 같은 객관 검사 실패도 기록하고 다음 질문을 검사하며, 객관 검사와 LLM 판정을 모두 통과해야 해당 답변이 통과합니다.
 
-지원하는 benchmark 설정은 다음과 같습니다.
+LLM 평가는 같은 Gemini 모델을 별도 호출하므로 편향과 변동성이 남으며, 이 사례들의 통과가 모든 답변의 정확성을 보장하지 않습니다. 검색 기준값 실험이 필요하면 기존 `rag.search.*` JVM 설정을 테스트 프로세스로 전달할 수 있습니다.
 
-- `BENCHMARK_MAX_PROMPTS`: max prompts per threshold for the script.
-- `BENCHMARK_EXTRA_ARGS`: extra Gradle args for the script.
-- `-Dbenchmark.max-prompts=<n>`: max prompts for direct Gradle runs.
-- `-Dbenchmark.prompt-timeout-ms=<ms>`: timeout for answer-generation benchmark tests.
-- `-Drag.search.similarity-threshold-override=<value>`: force the actual vector-search threshold for every query profile during comparison (0–1). Omit to retain the production per-query thresholds.
-
-Benchmark and `rag.search.*` JVM properties are forwarded to the test JVM. Live evaluations always execute afresh.
+기존 출력 위주의 threshold/QA benchmark와 관련 스크립트는 이 평가로 통합했습니다. 일반 `build`/CI는 외부 API 없이 객관적 회귀 검사와 평가기 파싱·오류 처리 검사를 실행하며, `liveEval`은 명시적으로 실행할 때만 매번 새로 수행합니다.
 
 테스트 fixture 위치입니다.
 
 - Portfolio retrieval contracts: `src/test/resources/evals/portfolio-retrieval-cases.json`
 - Embedding 2 live retrieval cases: `src/test/resources/evals/embedding2-retrieval-cases.json`
 - Router 평가 케이스: `src/test/resources/evals/router-eval-cases.json`
-- RAG 검색 prompt: `src/test/resources/evals/rag-benchmark-prompts.txt`
-- 이력서 QA prompt: `src/test/resources/evals/resume-qa-prompts.txt`
+- 평가기 정상·오답 사례: `src/test/resources/evals/answer-judge-calibration.json`
+- 실제 답변 평가 사례: `src/test/resources/evals/answer-quality-cases.json`
+- 평가 지침: `src/test/resources/evals/answer-judge.st`
 
 ## Spring AI 2.0 호환성 메모
 

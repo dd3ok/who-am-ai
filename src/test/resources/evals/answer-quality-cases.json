@@ -1,0 +1,15 @@
+[
+  {"id":"login-follow-up","turns":[
+    {"question":"ESM 로그인 개편을 설명해줘","expectedSources":["project_ESM_로그인_개편"]},
+    {"question":"그럼 사용한 기술은?","expectedSources":["project_ESM_로그인_개편"]},
+    {"question":"그럼 응답 시간이 몇 퍼센트 줄었어?","expectedSources":["project_ESM_로그인_개편"]}
+  ]},
+  {"id":"topic-change","turns":[
+    {"question":"ESM 카테고리 담당자 프로젝트를 설명해줘","expectedSources":["project_ESM_카테고리_담당자"]},
+    {"question":"그럼 학력과 전공을 알려줘","expectedSources":["education"]}
+  ]},
+  {"id":"false-premise","turns":[{"question":"ESM 로그인 개편에서 응답 시간을 90% 줄였다는데 맞아?","expectedSources":["project_ESM_로그인_개편"]}]},
+  {"id":"employment-date","turns":[{"question":"지마켓에서 언제부터 언제까지 근무했어?","expectedSources":["experience_지마켓"]}]},
+  {"id":"service-rag","turns":[{"question":"who-am-ai는 RAG를 사용해?","expectedSources":["service_profile"]}]},
+  {"id":"semantic-retrieval","turns":[{"question":"닷넷 인증을 마이크로서비스로 바꾸면서 캡챠를 내재화한 작업은?","expectedSources":["project_ESM_로그인_개편"],"requireVectorSearch":true}]}
+]

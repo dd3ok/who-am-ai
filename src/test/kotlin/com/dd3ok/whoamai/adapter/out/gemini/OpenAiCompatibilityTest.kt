@@ -3,6 +3,10 @@ package com.dd3ok.whoamai.adapter.out.gemini
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
+import com.dd3ok.whoamai.eval.AnswerSample
+import com.dd3ok.whoamai.eval.EvalSource
+import com.dd3ok.whoamai.eval.GeminiAnswerJudge
+import com.dd3ok.whoamai.eval.Verdict
 import com.sun.net.httpserver.HttpServer
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.flow.toList
@@ -72,6 +76,35 @@ class OpenAiCompatibilityTest {
                 assertEquals("system", body["messages"][0]["role"].stringValue())
                 assertEquals("프로젝트를 설명해줘", body["messages"][1]["content"].stringValue())
                 assertFalse(request.body.contains("gemini-local-test-only"))
+            }
+        }
+    }
+
+    @Test
+    fun `answer judge sends a strict JSON schema through the existing Gemini connection`() {
+        val judgement = """{"verdict":"PASS","reason":"원문과 일치합니다.","problemQuotes":[],"evidence":[{"sourceId":"login","quote":"Spring Boot"}]}"""
+        val stream = chunk(mapper.writeValueAsString(mapOf("content" to judgement))) +
+            chunk("{}", "\"stop\"") + "data: [DONE]\n\n"
+        withServer(200, "text/event-stream", stream) { baseUrl, requests ->
+            contextRunner(baseUrl).run { context ->
+                assertNull(context.startupFailure)
+                val judge = GeminiAnswerJudge(context.getBean(StreamingChatModel::class.java),
+                    context.getBean(GeminiChatModelProperties::class.java))
+                val result = runBlocking { judge.evaluate(AnswerSample("사용한 기술은?", emptyList(),
+                    listOf(EvalSource("login", "Spring Boot 사용")), "검색된 자료", "Spring Boot를 사용했습니다.")) }
+                assertEquals(Verdict.PASS, result.verdict)
+                val body = mapper.readTree(requests.single().body)
+                assertEquals("json_schema", body["response_format"]["type"].stringValue())
+                val format = body["response_format"]["json_schema"]
+                assertEquals(true, format["strict"].asBoolean())
+                val schema = format["schema"]
+                assertEquals(setOf("verdict", "reason", "problemQuotes", "evidence"),
+                    schema["required"].values().map { it.stringValue() }.toSet())
+                assertEquals(listOf("PASS", "FAIL", "REVIEW"),
+                    schema["properties"]["verdict"]["enum"].values().map { it.stringValue() })
+                assertEquals(false, schema["additionalProperties"].asBoolean())
+                assertEquals(setOf("sourceId", "quote"),
+                    schema["properties"]["evidence"]["items"]["required"].values().map { it.stringValue() }.toSet())
             }
         }
     }
