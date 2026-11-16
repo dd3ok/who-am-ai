@@ -1,9 +1,13 @@
 package com.dd3ok.whoamai.adapter.`in`.web
 
+import com.dd3ok.whoamai.application.service.DeepHealthMongoProbe
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.web.reactive.server.WebTestClient
+import kotlin.test.assertNotNull
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -19,6 +23,14 @@ class HealthEndpointTest {
 
     @LocalServerPort
     private var port: Int = 0
+
+    @Autowired
+    private lateinit var mongoProbeProvider: ObjectProvider<DeepHealthMongoProbe>
+
+    @Test
+    fun `MongoDB diagnostics are registered even when the database is unavailable`() {
+        assertNotNull(mongoProbeProvider.ifAvailable)
+    }
 
     @Test
     fun `actuator health stays up when MongoDB is unavailable`() {

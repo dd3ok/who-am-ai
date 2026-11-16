@@ -2,13 +2,11 @@ package com.dd3ok.whoamai.adapter.out.persistence
 
 import com.dd3ok.whoamai.application.service.DeepHealthMongoProbe
 import kotlinx.coroutines.reactor.awaitSingle
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
 import org.springframework.data.mongodb.core.ReactiveMongoOperations
 import org.springframework.stereotype.Component
 import java.time.Duration
 
 @Component
-@ConditionalOnBean(ReactiveMongoOperations::class)
 class ReactiveMongoDeepHealthProbe(
     private val mongoOperations: ReactiveMongoOperations
 ) : DeepHealthMongoProbe {
