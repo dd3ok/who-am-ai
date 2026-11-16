@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
+import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.service.ContextRetriever
@@ -40,7 +41,8 @@ class CareerRagEvalTest {
                 ownDomainProfileProvider = OwnDomainProfileProvider(),
                 metadataFilterEnabled = true
             ),
-            meterRegistry = SimpleMeterRegistry()
+            meterRegistry = SimpleMeterRegistry(),
+            conversationTopicPort = ConversationTopicPort { _, _, _ -> null }
         )
         val assembler = CareerPromptAssembler(EvalPromptProvider)
 

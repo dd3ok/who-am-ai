@@ -4,6 +4,7 @@ import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
 import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
@@ -44,7 +45,8 @@ class PortfolioRetrievalEvalTest {
                 }
                 val service = ChatService(
                     model, history, CareerContextPlanner(LLMRouter(provider, registry),
-                    ContextRetriever(IndexedFixture(resume), provider, OwnDomainProfileProvider(), true), registry),
+                    ContextRetriever(IndexedFixture(resume), provider, OwnDomainProfileProvider(), true), registry,
+                    ConversationTopicPort { _, _, _ -> null }),
                     CareerPromptAssembler(PromptTemplateService(DefaultResourceLoader(), PromptProperties(
                         systemPath = "classpath:prompts/system.st",
                         routingInstructionPath = "classpath:prompts/routing-instruction.st",

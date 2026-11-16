@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -18,7 +19,12 @@ import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.model.StreamingChatModel
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.openai.OpenAiChatOptions
+import org.springframework.ai.openai.OpenAiChatModel.ResponseFormat
+import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Component
+import tools.jackson.databind.DeserializationFeature
+import tools.jackson.databind.json.JsonMapper
+import tools.jackson.module.kotlin.KotlinModule
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
@@ -28,21 +34,51 @@ class GeminiAdapter(
     private val chatModelProperties: GeminiChatModelProperties,
     private val promptTemplateService: PromptProvider,
     private val meterRegistry: MeterRegistry
-) : GeminiPort {
+) : GeminiPort, ConversationTopicPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
     private val rateLimitedUntilByModel = ConcurrentHashMap<String, Long>()
+    private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build())
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build()
+    private val followUpInstruction by lazy {
+        ClassPathResource("prompts/follow-up.st").inputStream.bufferedReader().use { it.readText() }
+    }
+
+    override suspend fun selectTopic(question: String, history: List<ChatMessage>, topics: List<String>): String? {
+        if (topics.isEmpty()) return null
+        val format = ResponseFormat.builder().type(ResponseFormat.Type.JSON_SCHEMA).jsonSchema(
+            mapper.writeValueAsString(mapOf(
+                "type" to "object",
+                "properties" to mapOf("topicIndex" to mapOf("type" to "integer", "enum" to (0..topics.size).toList())),
+                "required" to listOf("topicIndex"), "additionalProperties" to false
+            ))
+        ).build()
+        val input = mapOf("question" to question, "history" to history,
+            "topics" to topics.mapIndexed { index, title -> mapOf("index" to index + 1, "title" to title) })
+        val result = StringBuilder()
+        streamWithPriorities(listOf(SystemMessage(followUpInstruction), UserMessage(mapper.writeValueAsString(input))), format)
+            .collect { result.append(it) }
+        val json = mapper.readTree(result.toString())
+        val index = json?.get("topicIndex")
+        check(json?.isObject == true && json.size() == 1 && index?.isIntegralNumber == true && index.canConvertToInt()) {
+            "Invalid conversation topic response."
+        }
+        val selected = index.intValue()
+        check(selected in 0..topics.size) { "Conversation topic response is outside the supplied candidates." }
+        return if (selected == 0) null else topics[selected - 1]
+    }
 
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
         return streamWithPriorities(messages)
     }
 
-    private fun buildChatOptions(model: String): OpenAiChatOptions {
+    private fun buildChatOptions(model: String, format: ResponseFormat?): OpenAiChatOptions {
         return OpenAiChatOptions.builder()
             .model(model)
             .reasoningEffort(chatModelProperties.reasoningEffort)
             .maxTokens(chatModelProperties.maxOutputTokens)
+            .also { if (format != null) it.responseFormat(format) }
             .build()
     }
 
@@ -53,14 +89,14 @@ class GeminiAdapter(
         return messages
     }
 
-    private fun streamWithPriorities(messages: List<Message>): Flow<String> = channelFlow {
+    private fun streamWithPriorities(messages: List<Message>, format: ResponseFormat? = null): Flow<String> = channelFlow {
         var lastError: Throwable? = null
         val models = availableModels().takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("No models configured in Gemini properties.")
 
         for ((idx, model) in models.withIndex()) {
             recordModelAttempt(model)
-            val options = buildChatOptions(model)
+            val options = buildChatOptions(model, format)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
 

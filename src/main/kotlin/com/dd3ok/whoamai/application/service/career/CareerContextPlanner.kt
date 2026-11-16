@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.service.ContextRetriever
+import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.service.LLMRouter
 import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -13,12 +14,13 @@ import org.springframework.stereotype.Component
 class CareerContextPlanner(
     private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
-    private val meterRegistry: MeterRegistry
+    private val meterRegistry: MeterRegistry,
+    private val conversationTopicPort: ConversationTopicPort
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     suspend fun plan(userPrompt: String, history: List<ChatMessage>): CareerContextPlan {
-        val retrievalPrompt = llmRouter.resolveQuery(userPrompt, history)
+        val retrievalPrompt = resolveQuery(userPrompt, history)
         var sources = recordSuspendTimer("whoamai.chat.rag.rule.duration") {
             contextRetriever.retrieveSourcesByRule(retrievalPrompt)
         }
@@ -56,6 +58,20 @@ class CareerContextPlanner(
                 resumeQuestionDetected = resumeQuestionDetected
             )
         )
+    }
+
+    private suspend fun resolveQuery(userPrompt: String, history: List<ChatMessage>): String {
+        val known = llmRouter.resolveQuery(userPrompt, history)
+        if (known != userPrompt) return known
+        // Assistant prose cannot establish a topic or supply facts. Bound the extra model input to user turns.
+        val recent = history.filter { it.role == "user" }.takeLast(6)
+        val topics = llmRouter.followUpTopics(userPrompt, recent)
+        if (topics.isEmpty()) return userPrompt
+        val selected = recordSuspendTimer("whoamai.chat.topic.resolve.duration") {
+            conversationTopicPort.selectTopic(userPrompt, recent, topics)
+        } ?: return userPrompt
+        check(selected in topics) { "Conversation topic must come from user-established candidates." }
+        return "$selected — $userPrompt"
     }
 
     private suspend fun <T> recordSuspendTimer(name: String, block: suspend () -> T): T {

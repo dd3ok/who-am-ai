@@ -20,6 +20,41 @@ import kotlin.test.assertTrue
 class GeminiAdapterTest {
 
     @Test
+    fun `topic selection accepts only a supplied index or no inheritance`() = runTest {
+        val model = RecordingStreamingChatModel(listOf(
+            Flux.just(chatResponse("{\"topicIndex\":1}")), Flux.just(chatResponse("{\"topicIndex\":0}"))))
+        val adapter = adapter(model)
+        val topics = listOf("ESM 로그인 개편")
+        assertEquals(topics.single(), adapter.selectTopic("얼마나 빨라졌어?", emptyList(), topics))
+        assertEquals(null, adapter.selectTopic("오늘 날씨는?", emptyList(), topics))
+        assertEquals(null, adapter.selectTopic("얼마나 빨라졌어?", emptyList(), emptyList()))
+        assertEquals(2, model.callCount)
+    }
+
+    @Test
+    fun `malformed or invented topic responses cannot become a retrieval query`() = runTest {
+        for (json in listOf("{}", "null", "{\"topicIndex\":-1}", "{\"topicIndex\":2}",
+            "{\"topicIndex\":0.5}", "{\"topicIndex\":\"1\"}", "{\"topicIndex\":999999999999999999}",
+            "{\"topicIndex\":1,\"topic\":\"invented\"}", "{\"topicIndex\":1} {}", "```json\n{\"topicIndex\":1}\n```")) {
+            val model = RecordingStreamingChatModel(listOf(Flux.just(chatResponse(json))))
+            assertFailsWith<Exception> {
+                adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf("ESM 로그인 개편"))
+            }
+            assertEquals(1, model.callCount)
+        }
+    }
+
+    @Test
+    fun `topic output followed by a provider error does not select a target`() = runTest {
+        val model = RecordingStreamingChatModel(listOf(Flux.concat(
+            Flux.just(chatResponse("{\"topicIndex\":1}")), Flux.error(IllegalStateException("provider failure")))))
+        assertFailsWith<IllegalStateException> {
+            adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf("ESM 로그인 개편"))
+        }
+        assertEquals(1, model.callCount)
+    }
+
+    @Test
     fun `default max output tokens allows detailed chat responses`() {
         assertEquals(8192, GeminiChatModelProperties().maxOutputTokens)
     }

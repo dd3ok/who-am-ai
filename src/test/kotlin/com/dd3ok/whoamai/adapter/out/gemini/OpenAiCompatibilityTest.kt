@@ -109,6 +109,31 @@ class OpenAiCompatibilityTest {
         }
     }
 
+    @Test
+    fun `conversation topic selection uses a separate structured request on the existing provider`() {
+        val stream = chunk(mapper.writeValueAsString(mapOf("content" to "{\"topicIndex\":1}"))) +
+            chunk("{}", "\"stop\"") + "data: [DONE]\n\n"
+        withServer(200, "text/event-stream", stream) { baseUrl, requests ->
+            contextRunner(baseUrl).run { context ->
+                val model = adapter(context.getBean(StreamingChatModel::class.java),
+                    context.getBean(GeminiChatModelProperties::class.java))
+                val topic = runBlocking { model.selectTopic("얼마나 빨라졌어?",
+                    listOf(ChatMessage("user", "ESM 로그인 개편 설명해줘")), listOf("ESM 로그인 개편")) }
+                assertEquals("ESM 로그인 개편", topic)
+                val body = mapper.readTree(requests.single().body)
+                assertEquals("gemini-3.8-flash", body["model"].stringValue())
+                assertEquals("medium", body["reasoning_effort"].stringValue())
+                assertEquals("json_schema", body["response_format"]["type"].stringValue())
+                assertEquals(listOf(0, 1), body["response_format"]["json_schema"]["schema"]
+                    ["properties"]["topicIndex"]["enum"].values().map { it.intValue() })
+                assertFalse(body["messages"][0]["content"].stringValue().contains("Use the provided resume facts."))
+                val input = mapper.readTree(body["messages"][1]["content"].stringValue())
+                assertEquals("얼마나 빨라졌어?", input["question"].stringValue())
+                assertEquals("ESM 로그인 개편", input["topics"][0]["title"].stringValue())
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = [401, 429, 503])
     fun `provider failures are propagated without automatic HTTP retries`(status: Int) {

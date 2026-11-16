@@ -2,6 +2,7 @@ package com.dd3ok.whoamai.application.service
 
 import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
@@ -332,7 +333,8 @@ class ChatServiceTest {
                     ownDomainProfileProvider = OwnDomainProfileProvider(),
                     metadataFilterEnabled = true
                 ),
-                meterRegistry = meterRegistry
+                meterRegistry = meterRegistry,
+                conversationTopicPort = ConversationTopicPort { _, _, _ -> null }
             ),
             careerPromptAssembler = CareerPromptAssembler(FakePromptProvider),
             meterRegistry = meterRegistry
