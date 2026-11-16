@@ -2,6 +2,7 @@ package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopic
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -44,7 +45,7 @@ class GeminiAdapter(
         ClassPathResource("prompts/follow-up.st").inputStream.bufferedReader().use { it.readText() }
     }
 
-    override suspend fun selectTopic(question: String, history: List<ChatMessage>, topics: List<String>): String? {
+    override suspend fun selectTopic(question: String, history: List<ChatMessage>, topics: List<ConversationTopic>): ConversationTopic? {
         if (topics.isEmpty()) return null
         val format = ResponseFormat.builder().type(ResponseFormat.Type.JSON_SCHEMA).jsonSchema(
             mapper.writeValueAsString(mapOf(
@@ -54,7 +55,7 @@ class GeminiAdapter(
             ))
         ).build()
         val input = mapOf("question" to question, "history" to history,
-            "topics" to topics.mapIndexed { index, title -> mapOf("index" to index + 1, "title" to title) })
+            "topics" to topics.mapIndexed { index, topic -> mapOf("index" to index + 1, "title" to topic.title) })
         val result = StringBuilder()
         streamWithPriorities(listOf(SystemMessage(followUpInstruction), UserMessage(mapper.writeValueAsString(input))), format)
             .collect { result.append(it) }

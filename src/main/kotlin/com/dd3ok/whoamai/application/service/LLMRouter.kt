@@ -82,25 +82,6 @@ class LLMRouter(
         return userPrompt
     }
 
-    /** Only user-established, known portfolio entities can be selected by semantic resolution. */
-    fun followUpTopics(userPrompt: String, history: List<ChatMessage>): List<String> {
-        val resume = resumeProviderPort.getResume()
-        val names = NameFragmentExtractor.extract(resume.name)
-        val current = normalizeResumeQuery(userPrompt)
-        if (NameFragmentExtractor.matches(current, names) || explicitTopics(current, resume).isNotEmpty() ||
-            isOwnServiceQuestion(current)) return emptyList()
-        return history.filter { it.role == "user" }.flatMap { message ->
-            val normalized = normalizeResumeQuery(message.text)
-            val topics = explicitTopics(normalized, resume)
-            when {
-                topics.isNotEmpty() -> topics
-                !isFollowUpQuestion(message.text) && isLikelyOwnDomainQuestion(message.text, normalized, resume, names) ->
-                    listOf(resume.name)
-                else -> emptyList()
-            }
-        }.filter { it.isNotBlank() }.distinct()
-    }
-
     private fun explicitTopics(query: String, resume: com.dd3ok.whoamai.domain.Resume): List<String> {
         val projects = resume.projects.filter { it.title.isNotBlank() && query.contains(normalizeResumeQuery(it.title)) }
         if (projects.isNotEmpty()) return projects.map { it.title }.distinct()

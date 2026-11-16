@@ -3,9 +3,11 @@ package com.dd3ok.whoamai.application.service
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopic
 import com.dd3ok.whoamai.application.service.dto.RouteDecision
 import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
+import com.dd3ok.whoamai.domain.ChatMessage
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.ai.vectorstore.filter.Filter
@@ -50,6 +52,49 @@ class ContextRetriever(
         )
     }
 
+    /** Reuse the existing source rules without reading MongoDB or treating assistant prose as evidence. */
+    fun conversationTopics(userPrompt: String, history: List<ChatMessage>): List<ConversationTopic> {
+        val resume = resumeProviderPort.getResume()
+        val names = NameFragmentExtractor.extract(resume.name)
+        fun workTopics(query: String): List<ConversationTopic> {
+            val projects = resume.projects.filter { containsResumeTerm(query, it.title) }
+            if (projects.isNotEmpty()) return projects.map {
+                ConversationTopic(it.title, listOf(ChunkIdGenerator.forProject(it.title)))
+            }
+            return resume.experiences.filter { exp ->
+                containsResumeTerm(query, exp.company) || exp.aliases.any { containsResumeTerm(query, it) }
+            }.map { exp ->
+                ConversationTopic(exp.company, listOf(ChunkIdGenerator.forExperience(exp.company)) +
+                    resume.projects.filter { it.company == exp.company }.map { ChunkIdGenerator.forProject(it.title) })
+            }
+        }
+        if (isOwnServiceQuestion(normalizeResumeQuery(userPrompt)) || workTopics(userPrompt).isNotEmpty()) return emptyList()
+        return history.filter { it.role == "user" }.flatMap { message ->
+            val normalized = normalizeResumeQuery(message.text)
+            when {
+                isOwnServiceQuestion(normalized) -> listOf(ConversationTopic("who-am-ai 구현 정보", listOf("service_profile")))
+                !isLikelyOwnDomainQuestion(message.text, normalized, resume, names) -> emptyList()
+                else -> workTopics(message.text).ifEmpty {
+                    rules.mapNotNull { it(RuleContext(normalized, names)) }.map { id ->
+                        when (id) {
+                            "projects" -> ConversationTopic("프로젝트", resume.projects.map { ChunkIdGenerator.forProject(it.title) })
+                            "experiences" -> ConversationTopic("경력", resume.experiences.map { ChunkIdGenerator.forExperience(it.company) })
+                            else -> ConversationTopic(withSourceDetails(ResumeSearchResult(id, inferChunkType(id), "")).title, listOf(id))
+                        }
+                    }
+                }
+            }
+        }.filter { it.sourceIds.isNotEmpty() }.distinct()
+    }
+
+    suspend fun retrieveSourcesForTopic(topic: ConversationTopic): List<ResumeSearchResult> {
+        if (topic.sourceIds == listOf("service_profile")) return listOf(serviceProfileSource())
+        return fetchStructuredChunks(topic.sourceIds).map(::withSourceDetails)
+    }
+
+    private fun serviceProfileSource() = ResumeSearchResult("service_profile", "service", ownDomainProfileProvider.serviceProfile(),
+        "who-am-ai 구현 정보", "https://github.com/dd3ok/who-am-ai")
+
     /**
      * 규칙 기반으로 컨텍스트를 검색합니다.
      * @return 컨텍스트를 찾으면 List<String>, 못 찾으면 빈 List를 반환합니다.
@@ -61,8 +106,7 @@ class ContextRetriever(
         val normalizedQuery = normalizeResumeQuery(userPrompt)
         if (isOwnServiceQuestion(normalizedQuery)) {
             logger.info("Context retrieved by: Own Service Rule.")
-            return listOf(ResumeSearchResult("service_profile", "service", ownDomainProfileProvider.serviceProfile(),
-                "who-am-ai 구현 정보", "https://github.com/dd3ok/who-am-ai"))
+            return listOf(serviceProfileSource())
         }
         val nameFragments = NameFragmentExtractor.extract(resume.name)
         if (!isLikelyOwnDomainQuestion(userPrompt, normalizedQuery, resume, nameFragments)) {

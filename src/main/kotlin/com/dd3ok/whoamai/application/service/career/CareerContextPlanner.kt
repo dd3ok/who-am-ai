@@ -2,6 +2,7 @@ package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.service.ContextRetriever
 import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
+import com.dd3ok.whoamai.application.port.out.ConversationTopic
 import com.dd3ok.whoamai.application.service.LLMRouter
 import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -20,14 +21,16 @@ class CareerContextPlanner(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     suspend fun plan(userPrompt: String, history: List<ChatMessage>): CareerContextPlan {
-        val retrievalPrompt = resolveQuery(userPrompt, history)
+        val resolved = resolveQuery(userPrompt, history)
+        val retrievalPrompt = resolved.query
         var sources = recordSuspendTimer("whoamai.chat.rag.rule.duration") {
-            contextRetriever.retrieveSourcesByRule(retrievalPrompt)
+            resolved.topic?.let { contextRetriever.retrieveSourcesForTopic(it) }
+                ?: contextRetriever.retrieveSourcesByRule(retrievalPrompt)
         }
-        var resumeQuestionDetected = sources.isNotEmpty()
+        var resumeQuestionDetected = resolved.topic != null || sources.isNotEmpty()
         var retrievalPath = if (sources.isNotEmpty()) "rule" else "unknown"
 
-        if (sources.isEmpty()) {
+        if (sources.isEmpty() && resolved.topic == null) {
             val routeDecision = llmRouter.route(retrievalPrompt)
             logger.info("No rule match. LLM Router hint: {}", routeDecision)
             if (routeDecision.queryType == QueryType.RESUME_RAG) {
@@ -60,19 +63,22 @@ class CareerContextPlanner(
         )
     }
 
-    private suspend fun resolveQuery(userPrompt: String, history: List<ChatMessage>): String {
+    private suspend fun resolveQuery(userPrompt: String, history: List<ChatMessage>): ResolvedQuery {
         val known = llmRouter.resolveQuery(userPrompt, history)
-        if (known != userPrompt) return known
         // Assistant prose cannot establish a topic or supply facts. Bound the extra model input to user turns.
         val recent = history.filter { it.role == "user" }.takeLast(6)
-        val topics = llmRouter.followUpTopics(userPrompt, recent)
-        if (topics.isEmpty()) return userPrompt
+        val topics = contextRetriever.conversationTopics(userPrompt, recent)
+        if (topics.isEmpty()) return ResolvedQuery(known)
+        // Keep the existing fast path only when its target still identifies a concrete candidate.
+        if (known != userPrompt && topics.any { known == "${it.title} — $userPrompt" }) return ResolvedQuery(known)
         val selected = recordSuspendTimer("whoamai.chat.topic.resolve.duration") {
             conversationTopicPort.selectTopic(userPrompt, recent, topics)
-        } ?: return userPrompt
+        } ?: return ResolvedQuery(userPrompt)
         check(selected in topics) { "Conversation topic must come from user-established candidates." }
-        return "$selected — $userPrompt"
+        return ResolvedQuery("${selected.title} — $userPrompt", selected)
     }
+
+    private data class ResolvedQuery(val query: String, val topic: ConversationTopic? = null)
 
     private suspend fun <T> recordSuspendTimer(name: String, block: suspend () -> T): T {
         val sample = Timer.start(meterRegistry)

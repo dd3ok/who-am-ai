@@ -22,13 +22,25 @@ import kotlin.test.assertFailsWith
 class CareerContextPlannerTest {
 
     @Test
+    fun `education follow up keeps its source after successful topic selection`() = runTest {
+        val planner = plannerWithChunks(mapOf("education" to "2017년 2월 졸업"), ConversationTopicPort { _, _, topics ->
+            topics.single()
+        })
+        val history = listOf(ChatMessage("user", "학력과 전공 알려줘"))
+        assertEquals(listOf("education"), planner.plan(history.single().text, emptyList()).prompt.sources.map { it.chunkId })
+        val plan = planner.plan("몇 년도에 졸업했어?", history)
+        assertEquals(listOf("education"), plan.prompt.sources.map { it.chunkId })
+        assertTrue(plan.prompt.useRagPrompt)
+    }
+
+    @Test
     fun `unlisted follow up wording preserves the project source through multiple turns`() = runTest {
         val project = "ESM 로그인 개편"
         val id = ChunkIdGenerator.forProject(project)
         val planner = plannerWithChunks(mapOf(id to "로그인 개편 자료"), ConversationTopicPort { _, history, topics ->
             assertTrue(history.all { it.role == "user" })
-            assertEquals(listOf(project), topics)
-            project
+            assertEquals(listOf(project, "기술 스택"), topics.map { it.title })
+            topics.single { it.title == project }
         })
         val history = listOf(
             ChatMessage("user", "$project 설명해줘"),
@@ -63,7 +75,7 @@ class CareerContextPlannerTest {
     @Test
     fun `independent question keeps its own subject when semantic resolution declines inheritance`() = runTest {
         val planner = plannerWithChunks(emptyMap(), ConversationTopicPort { _, history, topics ->
-            assertEquals(listOf("ESM 로그인 개편"), topics)
+            assertEquals(listOf("ESM 로그인 개편"), topics.map { it.title })
             assertTrue(history.none { it.role == "model" })
             null
         })
@@ -91,7 +103,9 @@ class CareerContextPlannerTest {
 
     @Test
     fun `unknown semantic topic is rejected before retrieval`() = runTest {
-        val planner = plannerWithChunks(emptyMap(), ConversationTopicPort { _, _, _ -> "가상의 프로젝트" })
+        val planner = plannerWithChunks(emptyMap(), ConversationTopicPort { _, _, topics ->
+            topics.single().copy(sourceIds = listOf("invented_source"))
+        })
         assertFailsWith<IllegalStateException> {
             planner.plan("얼마나 빨라졌어?", listOf(ChatMessage("user", "ESM 로그인 개편 설명해줘")))
         }
@@ -116,6 +130,48 @@ class CareerContextPlannerTest {
         for (question in listOf("ESM 로그인 개편 기간은?", "그럼 사용한 기술은?")) {
             assertEquals(listOf(id), planner.plan(question, history).prompt.sources.map { it.chunkId })
         }
+    }
+
+    @Test
+    fun `profile subjects remain distinct across transitions and repeated follow ups`() = runTest {
+        val chunks = mapOf("education" to "학력 자료", "certificates" to "자격증 자료", "recent_activities" to "최근 활동 자료")
+        for ((title, id, history, question) in listOf(
+            listOf("학력", "education", "학력과 전공 알려줘", "그건 몇 년도에 끝났어?"),
+            listOf("학력", "education", "학력과 전공 알려줘", "유인재님은 몇 년도에 졸업했어?"),
+            listOf("자격증", "certificates", "자격증 알려줘", "언제 땄어?"),
+            listOf("최근 활동", "recent_activities", "퇴사 이후에는 뭐해?", "요즘도 계속해?")
+        )) {
+            val planner = plannerWithChunks(chunks, ConversationTopicPort { _, _, topics -> topics.single { it.title == title } })
+            val turns = listOf(ChatMessage("user", "ESM 로그인 개편 설명해줘"), ChatMessage("user", history))
+            val plan = planner.plan(question, turns)
+            assertEquals(listOf(id), plan.prompt.sources.map { it.chunkId }, question)
+            assertEquals("$title — $question", plan.prompt.userPrompt)
+            assertTrue(plan.prompt.useRagPrompt)
+        }
+    }
+
+    @Test
+    fun `a selected but unavailable profile source stays in the missing evidence path`() = runTest {
+        val planner = plannerWithChunks(emptyMap(), ConversationTopicPort { _, _, topics -> topics.single() })
+        val plan = planner.plan("몇 년도에 졸업했어?", listOf(ChatMessage("user", "학력 알려줘")))
+        assertEquals("rag_empty", plan.retrieval.retrievalPath)
+        assertTrue(plan.retrieval.resumeQuestionDetected)
+        assertTrue(plan.prompt.useRagPrompt)
+        assertTrue(plan.prompt.sources.isEmpty())
+    }
+
+    @Test
+    fun `profile topics come only from user turns and reuse existing section rules`() = runTest {
+        val planner = plannerWithChunks(mapOf("education" to "학력 자료", "certificates" to "자격증 자료"),
+            ConversationTopicPort { _, history, topics ->
+                assertTrue(history.all { it.role == "user" })
+                assertEquals(listOf("학력", "자격증"), topics.map { it.title })
+                topics.single { it.title == "학력" }
+            })
+        val plan = planner.plan("몇 년도에 졸업했어?", listOf(
+            ChatMessage("user", "학력 알려줘"), ChatMessage("model", "취미도 있습니다."), ChatMessage("user", "자격증 알려줘")
+        ))
+        assertEquals(listOf("education"), plan.prompt.sources.map { it.chunkId })
     }
 
     private fun plannerWithChunks(

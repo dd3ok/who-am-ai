@@ -233,8 +233,8 @@ Missing or invalid dates leave the total unavailable instead of asking the model
 After changing the packaged `resume.json`, redeploy/restart and invoke the authenticated reindex endpoint to update stored chunks.
 No automatic production reindex runs during build or tests.
 
-Follow-ups use recent user questions to resolve the project or company before retrieval.
-When existing rules cannot resolve a target, the existing Gemini connection selects from known topics in the last six user turns using structured output. It selects a candidate index or no inheritance; it cannot rewrite the question or invent a new target. This adds one model request only when a prior portfolio topic needs disambiguation, measured by `whoamai.chat.topic.resolve.duration`.
+Follow-ups use recent user questions to resolve the project, company or profile section before retrieval.
+When existing rules cannot resolve a concrete target, the existing Gemini connection selects from known topics in the last six user turns using structured output. Candidates reuse the existing retrieval rules and retain their source IDs; profile sections such as education and certificates are not collapsed into the owner's name. The model selects a candidate index or no inheritance; it cannot rewrite the question or invent a target or source ID. Selected sources are fetched directly, and unavailable sources stay on the missing-evidence path. This adds one model request only when a prior portfolio topic needs disambiguation, measured by `whoamai.chat.topic.resolve.duration`.
 New topics and unrelated conversation stop that inheritance. Compound questions can retrieve multiple sections.
 Model-generated text is not used to establish a new topic. Profile capability questions default to portfolio answers;
 general study advice and questions explicitly about another subject remain general conversation.
@@ -305,8 +305,8 @@ CI runs it against a MongoDB service container alongside the build and Docker pa
 
 1. 실제 이력서를 색인하고 문서별 768차원·정규화·원문 보존과 Atlas 인덱스를 확인합니다. 한국어 검색 30건의 기대 자료가 상위 3개 안에 들어야 합니다. 이 검사는 규칙 검색을 우회해 임베딩 검색 순위를 측정합니다.
 2. 평가용 Gemini를 정상 답변 3개, 오답 5개, 근거 부족 1개로 먼저 검증합니다. 기대 판정은 모델 입력에 포함하지 않습니다. 이 기준 사례를 모두 구분해야 실제 답변 평가를 진행합니다.
-3. 후속 질문·주제 변경·허위 전제·근무 기간·서비스 RAG·벡터 검색 경로의 실제 답변 9개를 평가합니다. 출처, 응답 완료, 빈 응답 여부는 객관적으로 검사하고, 내용은 별도 Gemini 요청으로 판정합니다.
-4. 표현이 다른 후속 질문·연속 생략 질문·주제 변경 17건을 실제 Gemini로 판별하고, 기대 검색 대상과 출처가 유지되는지 검사합니다. 결과는 `build/reports/conversation-topic-eval.json`에 기록합니다.
+3. 후속 질문·주제 변경·허위 전제·근무 기간·서비스 RAG·벡터 검색 경로의 실제 답변 11개를 평가합니다. 출처, 응답 완료, 빈 응답 여부는 객관적으로 검사하고, 내용은 별도 Gemini 요청으로 판정합니다.
+4. 표현이 다른 후속 질문·연속 생략 질문·주제 변경과 학력·자격증·최근 활동 등 프로필 자료 항목의 후속 질문 27건을 실제 Gemini로 판별하고, 기대 검색 대상과 출처가 유지되는지 검사합니다. 결과는 `build/reports/conversation-topic-eval.json`에 기록합니다.
 
 평가기 `GeminiAnswerJudge`는 테스트 소스에만 존재하며 기존 `StreamingChatModel` 연결과 Gemini 모델·추론 설정을 재사용합니다. 포트폴리오 답변용 시스템 프롬프트 대신 평가 전용 프롬프트를 사용합니다. 원문 자료, 질문·대화 이력, 실제 모델에 전달된 검색 문맥과 답변을 비교하여 `PASS` / `FAIL` / `REVIEW`, 이유, 문제 문장과 원문 근거를 반환합니다. [Gemini의 구조화 출력](https://ai.google.dev/gemini-api/docs/openai#structured-output)에 JSON 스키마를 전달하고 반환값과 인용을 다시 검증합니다. `REVIEW`, API 오류·시간 초과·잘못된 JSON·검증 불가능한 인용은 통과로 취급하지 않습니다.
 

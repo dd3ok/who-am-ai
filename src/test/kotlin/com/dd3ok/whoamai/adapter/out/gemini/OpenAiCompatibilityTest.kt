@@ -3,6 +3,7 @@ package com.dd3ok.whoamai.adapter.out.gemini
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
+import com.dd3ok.whoamai.application.port.out.ConversationTopic
 import com.dd3ok.whoamai.eval.AnswerSample
 import com.dd3ok.whoamai.eval.EvalSource
 import com.dd3ok.whoamai.eval.GeminiAnswerJudge
@@ -117,9 +118,10 @@ class OpenAiCompatibilityTest {
             contextRunner(baseUrl).run { context ->
                 val model = adapter(context.getBean(StreamingChatModel::class.java),
                     context.getBean(GeminiChatModelProperties::class.java))
+                val candidate = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
                 val topic = runBlocking { model.selectTopic("얼마나 빨라졌어?",
-                    listOf(ChatMessage("user", "ESM 로그인 개편 설명해줘")), listOf("ESM 로그인 개편")) }
-                assertEquals("ESM 로그인 개편", topic)
+                    listOf(ChatMessage("user", "ESM 로그인 개편 설명해줘")), listOf(candidate)) }
+                assertEquals(candidate, topic)
                 val body = mapper.readTree(requests.single().body)
                 assertEquals("gemini-3.8-flash", body["model"].stringValue())
                 assertEquals("medium", body["reasoning_effort"].stringValue())
@@ -130,6 +132,7 @@ class OpenAiCompatibilityTest {
                 val input = mapper.readTree(body["messages"][1]["content"].stringValue())
                 assertEquals("얼마나 빨라졌어?", input["question"].stringValue())
                 assertEquals("ESM 로그인 개편", input["topics"][0]["title"].stringValue())
+                assertFalse(input["topics"][0].has("sourceIds"))
             }
         }
     }

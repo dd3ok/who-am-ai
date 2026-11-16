@@ -9,7 +9,6 @@ import com.dd3ok.whoamai.domain.StreamMessage
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
-import com.dd3ok.whoamai.common.util.ChunkIdGenerator
 import com.dd3ok.whoamai.eval.*
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.flow.toList
@@ -199,22 +198,18 @@ class CareerAgentLiveEvalTest {
     fun `real topic resolution handles varied follow ups and independent topic changes`() = runBlocking {
         val cases: List<TopicCase> = ClassPathResource("evals/conversation-topic-cases.json").inputStream.use { mapper.readValue(it) }
         val results = mutableListOf<Map<String, Any?>>()
-        val resume = resumeProvider.getResume()
         val output = Path.of("build/reports/conversation-topic-eval.json")
         try {
             for (case in cases) {
                 val history = case.history.map { ChatMessage("user", it) }
                 val plan = withTimeout(120_000) { contextPlanner.plan(case.question, history) }
                 val expectedQuery = case.expectedTopic?.let { "$it — ${case.question}" } ?: case.question
-                val expectedSource = case.expectedTopic?.let { topic ->
-                    if (resume.projects.any { it.title == topic }) ChunkIdGenerator.forProject(topic)
-                    else ChunkIdGenerator.forExperience(topic)
-                }
+                require(case.expectedTopic == null || case.expectedSources.isNotEmpty())
                 val passed = plan.prompt.userPrompt == expectedQuery &&
-                    (expectedSource == null || plan.prompt.sources.any { it.chunkId == expectedSource })
+                    plan.prompt.sources.map { it.chunkId }.containsAll(case.expectedSources)
                 results += mapOf("id" to case.id, "history" to case.history, "question" to case.question,
                     "expectedQuery" to expectedQuery, "actualQuery" to plan.prompt.userPrompt,
-                    "sourceIds" to plan.prompt.sources.map { it.chunkId }, "passed" to passed)
+                    "expectedSources" to case.expectedSources, "sourceIds" to plan.prompt.sources.map { it.chunkId }, "passed" to passed)
                 println("TOPIC_EVAL|id=${case.id}|passed=$passed")
             }
         } finally {
@@ -262,6 +257,7 @@ class CareerAgentLiveEvalTest {
     private data class CalibrationCase(val id: String, val question: String, val history: List<ChatMessage> = emptyList(),
         val referenceIds: List<String>, val answer: String, val expected: Verdict)
     private data class ConversationCase(val id: String, val turns: List<Turn>)
-    private data class TopicCase(val id: String, val history: List<String>, val question: String, val expectedTopic: String?)
+    private data class TopicCase(val id: String, val history: List<String>, val question: String,
+        val expectedTopic: String?, val expectedSources: List<String>)
     private data class Turn(val question: String, val expectedSources: List<String>, val requireVectorSearch: Boolean = false)
 }

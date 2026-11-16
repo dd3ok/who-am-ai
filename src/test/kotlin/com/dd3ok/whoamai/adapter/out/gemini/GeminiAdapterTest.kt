@@ -1,6 +1,7 @@
 package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
+import com.dd3ok.whoamai.application.port.out.ConversationTopic
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.collect
@@ -18,13 +19,14 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class GeminiAdapterTest {
+    private val loginTopic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
 
     @Test
     fun `topic selection accepts only a supplied index or no inheritance`() = runTest {
         val model = RecordingStreamingChatModel(listOf(
             Flux.just(chatResponse("{\"topicIndex\":1}")), Flux.just(chatResponse("{\"topicIndex\":0}"))))
         val adapter = adapter(model)
-        val topics = listOf("ESM 로그인 개편")
+        val topics = listOf(loginTopic)
         assertEquals(topics.single(), adapter.selectTopic("얼마나 빨라졌어?", emptyList(), topics))
         assertEquals(null, adapter.selectTopic("오늘 날씨는?", emptyList(), topics))
         assertEquals(null, adapter.selectTopic("얼마나 빨라졌어?", emptyList(), emptyList()))
@@ -38,7 +40,7 @@ class GeminiAdapterTest {
             "{\"topicIndex\":1,\"topic\":\"invented\"}", "{\"topicIndex\":1} {}", "```json\n{\"topicIndex\":1}\n```")) {
             val model = RecordingStreamingChatModel(listOf(Flux.just(chatResponse(json))))
             assertFailsWith<Exception> {
-                adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf("ESM 로그인 개편"))
+                adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf(loginTopic))
             }
             assertEquals(1, model.callCount)
         }
@@ -49,7 +51,7 @@ class GeminiAdapterTest {
         val model = RecordingStreamingChatModel(listOf(Flux.concat(
             Flux.just(chatResponse("{\"topicIndex\":1}")), Flux.error(IllegalStateException("provider failure")))))
         assertFailsWith<IllegalStateException> {
-            adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf("ESM 로그인 개편"))
+            adapter(model).selectTopic("얼마나 빨라졌어?", emptyList(), listOf(loginTopic))
         }
         assertEquals(1, model.callCount)
     }
