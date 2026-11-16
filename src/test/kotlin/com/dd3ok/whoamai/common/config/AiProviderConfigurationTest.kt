@@ -43,6 +43,10 @@ class AiProviderConfigurationTest {
             .withPropertyValues("GEMINI_API_KEY=local-test-only", "GEMINI_EMBEDDING_API_KEY=local-test-only")
             .run { context ->
                 assertNull(context.startupFailure)
+                assertEquals("gemini-embedding-2", context.environment.getProperty("spring.ai.google.genai.embedding.text.model"))
+                assertEquals("768", context.environment.getProperty("spring.ai.google.genai.embedding.text.dimensions"))
+                assertEquals("resume_chunks_embedding2", context.environment.getProperty("spring.ai.vectorstore.mongodb.collection-name"))
+                assertNull(context.environment.getProperty("spring.ai.google.genai.embedding.text.task-type"))
                 assertIs<OpenAiChatModel>(context.getBean(StreamingChatModel::class.java))
                 assertEquals(setOf("googleGenAiTextEmbedding"), context.getBeansOfType(EmbeddingModel::class.java).keys)
                 assertIs<GoogleGenAiTextEmbeddingModel>(context.getBean(EmbeddingModel::class.java))

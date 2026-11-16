@@ -20,7 +20,7 @@
 - AI: Spring AI 2.0.0, Google Gemini chat / embedding
 - JSON: Jackson 3
 - chat 모델: `gemini-3.8-flash`, reasoning effort `medium`
-- embedding 모델: `gemini-embedding-001`, 768 dimensions
+- embedding 모델: `gemini-embedding-2`, 768 dimensions
 - 저장소: MongoDB Atlas Vector Search
 - 빌드: Gradle Wrapper
 
@@ -73,7 +73,7 @@ export GEMINI_API_KEY="<google-genai-key>"
 `GEMINI_API_KEY`는 채팅과 임베딩에 공통으로 사용합니다. 임베딩만 별도 프로젝트를 쓰려면 선택적으로 `GEMINI_EMBEDDING_API_KEY`를 지정합니다.
 키는 백엔드 환경변수로만 설정하며, 코드·프런트 공개 환경변수·로그에 넣지 않습니다.
 `MONGO_URI`는 벡터를 저장하고 검색하는 DB 연결입니다. 질문을 벡터로 만드는 임베딩 API를 대신하지 않습니다.
-기존 `gemini-embedding-001`과 768차원 Atlas 인덱스를 유지합니다.
+임베딩은 `gemini-embedding-2`와 768차원 Atlas 인덱스를 사용합니다. 기존 `001` 벡터와 섞이지 않도록 별도 컬렉션에 재색인합니다.
 
 관리자 API를 사용하려면 다음 값도 설정합니다.
 
@@ -90,8 +90,8 @@ spring:
   ai:
     model:
       chat: openai
-      embedding:
-        text: google-genai
+      embedding: none
+      embedding.text: google-genai
     openai:
       base-url: https://generativelanguage.googleapis.com/v1beta/openai
       api-key: ${GEMINI_API_KEY}
@@ -107,9 +107,8 @@ spring:
         embedding:
           api-key: ${spring.ai.google.genai.api-key}
           text:
-            model: gemini-embedding-001
+            model: gemini-embedding-2
             dimensions: 768
-            task-type: RETRIEVAL_DOCUMENT
 ```
 
 요청별 모델 옵션은 기존 애플리케이션 설정인 `who-am-ai.ai.chat.*`에 둡니다. 모델과 추론 단계는 `spring.ai.openai.chat.*` 기본값과 맞춥니다.
@@ -132,14 +131,26 @@ export SPRING_APPLICATION_JSON='{"who-am-ai":{"ai":{"chat":{"models":["gemini-3.
 
 ## MongoDB Atlas Vector Search
 
-Atlas에는 `resume_chunks` 컬렉션과 `vector_index` Search index가 필요합니다.
+Atlas에는 `resume_chunks_embedding2` 컬렉션과 `vector_index` Search index가 필요합니다.
 
 - 인덱스 이름: `vector_index`
-- 컬렉션: `resume_chunks`
-- 벡터 필드: `content_embedding`
+- 컬렉션: `resume_chunks_embedding2`
+- 벡터 필드: `embedding` (현재 Spring AI의 실제 저장 필드)
 - 인덱스 설정 파일: `src/main/resources/atlas-index.json`
 
-`gemini-embedding-001`은 768차원 벡터로 명시되어 있습니다. embedding 모델이나 차원을 바꾸면 Atlas vector index를 다시 만들고 이력서 청크도 재색인해야 합니다.
+`gemini-embedding-2`는 768차원 벡터를 생성합니다. 모델을 바꾸면 같은 차원이어도 모든 자료를 다시 임베딩해야 하며, 차원을 바꾸면 Atlas 인덱스의 `numDimensions`도 맞춰야 합니다.
+
+`GeminiRetrievalEmbeddingModel`은 기존 Spring AI 임베딩을 감싸 검색 질문에 `task: search result | query: ...`, 문서에 `title: ... | text: ...`를 적용합니다. 문서별 임베딩을 유지하고 저장 원문·출처 메타데이터는 변경하지 않습니다. `task_type` 요청 필드는 사용하지 않습니다. 형식은 [Google Embedding 2 안내](https://ai.google.dev/gemini-api/docs/embeddings#task-types-embeddings-2)를 따릅니다.
+
+### Embedding 001에서 전환
+
+1. 준비용 실행에서 새 컬렉션 `resume_chunks_embedding2`를 지정합니다. 운영 `resume_chunks`에 새 모델의 벡터를 쓰지 않습니다.
+2. 새 컬렉션에 `src/main/resources/atlas-index.json` 정의로 `vector_index`를 만들고 준비 상태를 확인합니다. `initialize-schema: false`이므로 앱이 인덱스를 자동 생성하지 않습니다.
+3. 새 코드의 인증된 `POST /api/admin/resume/reindex`를 준비용 실행에 호출해 자료를 적재합니다. 기존 운영 서버에 호출하면 이전 모델로 색인되므로 전환 준비가 되지 않습니다.
+4. 새 컬렉션에서 실제 검색·출처·후속 질문과 기존 유사도 기준값을 검증한 뒤 새 코드와 컬렉션을 함께 운영에 적용합니다.
+5. 되돌릴 때는 이전 배포본과 `resume_chunks`를 함께 복원합니다. 기존 컬렉션은 검증이 끝날 때까지 보존합니다.
+
+두 모델의 벡터 공간은 호환되지 않습니다. [Google 마이그레이션 안내](https://ai.google.dev/gemini-api/docs/embeddings#migration)를 참고하세요.
 
 ## 실행
 
@@ -281,6 +292,8 @@ CI runs it against a MongoDB service container alongside the build and Docker pa
 
 `OpenAiCompatibilityTest` checks actual Spring AI HTTP requests, Gemini model / medium reasoning settings, authentication headers, SSE responses, and failed-auth retry behavior using a local server and fake keys only.
 
+`GeminiEmbeddingCompatibilityTest` exercises the configured MongoDB VectorStore, Spring AI and Google SDK against a local HTTP server. It checks Embedding 2 / 768 dimensions, omitted task-type fields, separate vectors for each document, document/query prefixes and unmodified stored/source text.
+
 Live tests require `EVAL_MONGO_URI` pointing to a **dedicated evaluation database** and `GEMINI_API_KEY`.
 An optional `GEMINI_EMBEDDING_API_KEY` overrides the key used for embeddings only.
 They reindex that evaluation database and use paid/quota-limited API calls. Review emitted answers for factual accuracy;
@@ -290,6 +303,14 @@ request errors and blank responses fail the run. Keep prompt counts low:
 BENCHMARK_MAX_PROMPTS=5 ./scripts/run-threshold-benchmark.sh
 ./gradlew liveEval --tests "*ResumeQaAnswerTest" -Dbenchmark.max-prompts=5
 ```
+
+Embedding 2의 실제 전환 검증은 **새로 만든 일회용 DB** `whoamai_embedding2_eval_<고유 영숫자 접미사>`를 `EVAL_MONGO_URI`에 지정해 실행합니다. 이 검사는 비어 있지 않은 DB를 거부하고, 평가 종료 시 자신이 사용한 DB를 삭제합니다.
+
+```bash
+./gradlew liveEval --tests "*Embedding2RetrievalEvalTest"
+```
+
+실제 이력서 색인, 문서별 768차원·정규화·원문 보존, Atlas 인덱스 준비, 한국어 질문 30개의 상위 3개 결과 내 정답 자료 포함 여부, 실제 Gemini 채팅의 프로젝트 후속 질문을 확인합니다. 검색 모델 평가는 규칙 검색을 우회하며, 점수는 `build/reports/embedding2-retrieval-eval.json`에 기록합니다. 결과는 이 평가 자료에 한정되며 모든 질문의 답변 정확도를 보장하지 않습니다.
 
 지원하는 benchmark 설정은 다음과 같습니다.
 
@@ -304,6 +325,7 @@ Benchmark and `rag.search.*` JVM properties are forwarded to the test JVM. Live 
 테스트 fixture 위치입니다.
 
 - Portfolio retrieval contracts: `src/test/resources/evals/portfolio-retrieval-cases.json`
+- Embedding 2 live retrieval cases: `src/test/resources/evals/embedding2-retrieval-cases.json`
 - Router 평가 케이스: `src/test/resources/evals/router-eval-cases.json`
 - RAG 검색 prompt: `src/test/resources/evals/rag-benchmark-prompts.txt`
 - 이력서 QA prompt: `src/test/resources/evals/resume-qa-prompts.txt`

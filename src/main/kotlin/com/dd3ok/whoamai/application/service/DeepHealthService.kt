@@ -79,7 +79,7 @@ class DefaultDeepHealthService(
         val collectionName = vectorStorePropertiesProvider.ifAvailable
             ?.collectionName
             ?.takeIf { it.isNotBlank() }
-            ?: "resume_chunks"
+            ?: "resume_chunks_embedding2"
         return try {
             if (probe.collectionExists(collectionName)) {
                 DeepHealthComponent(UP, "collection '$collectionName' exists")

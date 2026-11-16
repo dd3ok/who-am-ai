@@ -2,7 +2,7 @@
   "fields": [
     {
       "type": "vector",
-      "path": "content_embedding",
+      "path": "embedding",
       "numDimensions": 768,
       "similarity": "cosine"
     },

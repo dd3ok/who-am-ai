@@ -20,20 +20,19 @@ spring:
         max-tokens: 8192
     google:
       genai:
-        # Preserve the embedding model and dimensions used by existing Atlas vectors.
+        # Embedding 2 uses retrieval prefixes in API inputs and a separate Atlas collection.
         api-key: ${GEMINI_EMBEDDING_API_KEY:${GEMINI_API_KEY:}}
         embedding:
           api-key: ${spring.ai.google.genai.api-key}
           text:
-            model: gemini-embedding-001
+            model: gemini-embedding-2
             dimensions: 768
-            task-type: RETRIEVAL_DOCUMENT
     vectorstore:
       mongodb:
         initialize-schema: false
-        collection-name: resume_chunks
+        collection-name: resume_chunks_embedding2
         index-name: vector_index
-        path-name: content_embedding
+        path-name: embedding
         metadata-fields-to-filter: company,skills
 
 server:

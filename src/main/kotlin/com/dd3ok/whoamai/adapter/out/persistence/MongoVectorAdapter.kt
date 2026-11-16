@@ -146,7 +146,7 @@ class MongoVectorAdapter(
     }
 
     companion object {
-        const val COLLECTION_NAME = "resume_chunks"
+        const val COLLECTION_NAME = "resume_chunks_embedding2"
         const val VECTOR_INDEX_NAME = "vector_index"
     }
 

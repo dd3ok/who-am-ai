@@ -1,10 +1,12 @@
 package com.dd3ok.whoamai.common.config
 
+import com.dd3ok.whoamai.adapter.out.gemini.GeminiRetrievalEmbeddingModel
 import org.springframework.ai.embedding.BatchingStrategy
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.ai.embedding.TokenCountBatchingStrategy
 import org.springframework.ai.vectorstore.mongodb.atlas.MongoDBAtlasVectorStore
 import org.springframework.ai.vectorstore.mongodb.autoconfigure.MongoDBAtlasVectorStoreProperties
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -31,9 +33,11 @@ class MongoVectorStoreConfig {
         mongoTemplate: MongoTemplate,
         embeddingModel: EmbeddingModel,
         properties: MongoDBAtlasVectorStoreProperties,
-        batchingStrategy: BatchingStrategy
+        batchingStrategy: BatchingStrategy,
+        @Value("\${spring.ai.google.genai.embedding.text.dimensions}") embeddingDimensions: Int
     ): MongoDBAtlasVectorStore {
-        val builder = MongoDBAtlasVectorStore.builder(mongoTemplate, embeddingModel)
+        val builder = MongoDBAtlasVectorStore.builder(mongoTemplate,
+            GeminiRetrievalEmbeddingModel(embeddingModel, embeddingDimensions))
 
         builder.initializeSchema(properties.isInitializeSchema)
         builder.batchingStrategy(batchingStrategy)
