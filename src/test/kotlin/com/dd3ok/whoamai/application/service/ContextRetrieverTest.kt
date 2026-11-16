@@ -176,6 +176,14 @@ class ContextRetrieverTest {
     }
 
     @Test
+    fun `public github project query should return portfolio projects rather than only service profile`() = runTest {
+        persistencePort.stub(ChunkIdGenerator.forProject("정산 플랫폼"), "PROJECT_CONTENT")
+        val result = contextRetriever.retrieveByRule("최근 공개 GitHub 프로젝트 알려줘")
+
+        assertEquals(listOf("PROJECT_CONTENT"), result)
+    }
+
+    @Test
     fun `declarative chat with resume keyword must not trigger rule retrieval`() = runTest {
         persistencePort.stub(ChunkIdGenerator.forSummary(), "SUMMARY")
 

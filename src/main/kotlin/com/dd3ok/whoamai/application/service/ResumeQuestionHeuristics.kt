@@ -168,7 +168,7 @@ private val SELF_SERVICE_REFERENCE_TOKENS = listOf(
 ).map(::normalizeResumeQuery)
 
 private val OWN_SERVICE_NAMED_TOKENS = listOf(
-    "who-am-ai", "whoamai", "이 서비스", "이 앱", "이 챗봇", "레포", "repo", "깃허브", "github"
+    "who-am-ai", "whoamai", "이 서비스", "이 앱", "이 챗봇"
 ).map(::normalizeResumeQuery)
 
 private val SELF_CONTAINED_PROFILE_KEYWORDS = listOf(
