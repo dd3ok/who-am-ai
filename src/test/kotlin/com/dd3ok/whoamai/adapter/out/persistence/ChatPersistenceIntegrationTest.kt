@@ -1,7 +1,9 @@
 package com.dd3ok.whoamai.adapter.out.persistence
 
+import com.dd3ok.whoamai.domain.CachedChatAnswer
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.ChatSession
+import com.dd3ok.whoamai.domain.ChatSource
 import com.mongodb.ConnectionString
 import com.mongodb.reactivestreams.client.MongoClient
 import com.mongodb.reactivestreams.client.MongoClients
@@ -92,5 +94,31 @@ class ChatPersistenceIntegrationTest {
         access.createSession("hashed-token", session)
         assertEquals(session, ChatAccessStoreAdapter(template).findSession("hashed-token"))
         assertEquals(null, access.findSession("unknown-token"))
+    }
+
+    @Test
+    fun `cached chat answers survive node restarts, expire cleanly, and clear on reindex`() = runBlocking {
+        val cacheWriter = MongoChatAnswerCacheAdapter(template)
+        val cacheReader = MongoChatAnswerCacheAdapter(template)
+        val entry = CachedChatAnswer(
+            cacheKey = "cache-key-1",
+            normalizedPrompt = "who-am-ai 구조",
+            answerText = "WebFlux와 Spring AI 기반입니다.",
+            sources = listOf(ChatSource("service_profile", "who-am-ai 구현 정보")),
+            resumeVersion = "v1"
+        )
+        cacheWriter.save(entry, Instant.now().plusSeconds(120))
+
+        val loaded = cacheReader.find("cache-key-1")
+        assertEquals(entry, loaded)
+        val doc = template.findById("cache-key-1", ChatAnswerCacheDocument::class.java).awaitSingle()
+        assertEquals(1L, doc.hitCount)
+        assertTrue(
+            template.indexOps(ChatAnswerCacheDocument::class.java).indexInfo.collectList().awaitSingle()
+                .any { it.expireAfter.isPresent && it.expireAfter.get().seconds == 0L }
+        )
+
+        cacheWriter.deleteAll()
+        assertEquals(null, MongoChatAnswerCacheAdapter(template).find("cache-key-1"))
     }
 }

@@ -1,9 +1,12 @@
 package com.dd3ok.whoamai.application.service
 
+import com.dd3ok.whoamai.application.port.out.ChatAnswerCacheStore
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
+import com.dd3ok.whoamai.domain.CachedChatAnswer
 import com.dd3ok.whoamai.domain.Resume
+import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,9 +24,18 @@ class ManageResumeServiceTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun `reindex requests are serialized in a single application instance`() = runTest {
         val persistencePort = RecordingResumePersistencePort()
+        var cacheEvictions = 0
+        val cacheStore = object : ChatAnswerCacheStore {
+            override suspend fun find(cacheKey: String): CachedChatAnswer? = null
+            override suspend fun save(entry: CachedChatAnswer, expiresAt: Instant) {}
+            override suspend fun deleteAll() {
+                cacheEvictions += 1
+            }
+        }
         val service = ManageResumeService(
             resumeProviderPort = InitializedResumeProviderPort,
-            resumePersistencePort = persistencePort
+            resumePersistencePort = persistencePort,
+            chatAnswerCacheStore = cacheStore
         )
 
         val first = async { service.reindexResumeData() }
@@ -36,6 +48,7 @@ class ManageResumeServiceTest {
         second.await()
         assertEquals(2, persistencePort.calls)
         assertEquals(1, persistencePort.maxActiveCalls)
+        assertEquals(2, cacheEvictions)
     }
 
     private object InitializedResumeProviderPort : ResumeProviderPort {

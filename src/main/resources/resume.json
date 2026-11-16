@@ -1,15 +1,15 @@
 {
   "name": "유인재",
   "summary": "7년 경력의 Spring Boot 기반 백엔드 개발자. 단순하고 이해하기 쉬운 코드를 선호하며, 확장성과 유지보수성을 고려한 시스템 아키텍처를 지향합니다. 분산 환경 이해를 바탕으로 안정적인 서비스를 만들고 오너십을 갖고 개선합니다. 명확한 커뮤니케이션으로 비즈니스 목표를 달성하고 사용자·조직에 가치를 제공하는 개발자입니다. 최근 AI 에이전트/LLM 기반 서비스 개발에도 깊은 관심을 두고 있습니다.",
-  "recentActivities": "퇴사 이후에는 AI 에이전트와 백엔드 시스템 설계 역량을 중심으로 개인 프로젝트를 진행하고 있습니다. 주식 데이터 수집, 예측, 평가, 텔레그램 브리핑까지 이어지는 Python 기반 파이프라인을 만들고 있고, 동시에 who-am-ai, WATCHLIST.md, savepoint, lucid 같은 저장소를 만들며 LLM 기반 서비스와 AI 에이전트 개발 도구를 직접 설계하고 있습니다. 여기에 더해 대규모 트래픽 처리, 분산 환경의 동시성·원자성·멱등성, 데이터 정합성, 캐싱과 큐 기반 아키텍처 등 시니어 백엔드 개발자에게 필요한 시스템 디자인 역량도 꾸준히 학습하고 있습니다.",
+  "recentActivities": "퇴사 이후에는 AI 에이전트, Python 기반 데이터·자동화 파이프라인, 백엔드 시스템 설계 역량을 중심으로 개인 프로젝트를 진행하고 있습니다. 비공개 개인 실험으로 국내외 주식 데이터 수집, 예측, 평가, 텔레그램 브리핑까지 이어지는 Python 기반 파이프라인을 운영·검증해 왔으며, 공개 GitHub 저장소로는 비동기 피드 수집·Google Gemini 번역·텔레그램 브리핑 파이프라인인 isitnowbot(Python 3.11, asyncio, python-telegram-bot, google-genai, pydantic, tenacity, cachetools, curl-cffi), 공개 시장 데이터 조회 스킬 카탈로그 및 CLI인 market-data-skills(naverstock-api-skill, naverfinance-api-skill, tossinvest-api-skill, yahoo-finance-market-skill/yfinance, upbit-read-api-skill, binance-api-skill), 그리고 who-am-ai, repoclip(FastAPI), briefprint, WATCHLIST.md, savepoint, lucid, spring-engineering-skills, boring-backend 같은 LLM 기반 서비스와 AI 에이전트 개발 도구를 직접 설계·공개했습니다. 여기에 더해 대규모 트래픽 처리, 분산 환경의 동시성·원자성·멱등성, 데이터 정합성, 캐싱과 큐 기반 아키텍처 등 시니어 백엔드 개발자에게 필요한 시스템 디자인 역량도 꾸준히 학습하고 있습니다.",
   "blog": "https://yangori.tistory.com",
   "mbti": "INFP",
   "skills": [
-    "Spring Boot", "Spring Framework", "JPA", "Node.js", ".NET",
+    "Spring Boot", "Spring Framework", "JPA", "FastAPI", "Node.js", ".NET",
     "React", "Next.js", "Vue", "jQuery", "JSP", "HTML",
     "SQL Server", "Oracle", "Redis",
     "Kafka", "Docker", "Git",
-    "Java", "JavaScript", "TypeScript", "SQL"
+    "Java", "Python", "JavaScript", "TypeScript", "SQL"
   ],
   "certificates": [
     {
@@ -229,6 +229,61 @@
       "contribution": "공식 문서 기반 레퍼런스, Spot 범위 경계 지침, 보조 스크립트 및 Testnet 안전 가이드를 구성했습니다.",
       "outcome": "공개 저장소에 릴리스 및 검증 케이스가 공개되어 있습니다.",
       "sourceUrl": "https://github.com/dd3ok/binance-api-skill"
+    },
+    {
+      "title": "isitnowbot",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Google Gemini", "Telegram Bot"],
+      "tags": ["파이프라인", "비동기 수집", "번역", "텔레그램 브리핑", "자동화"],
+      "description": "피드를 주기적으로 수집해 Google Gemini로 번역한 뒤 텔레그램 채널·채팅방으로 전달하는 Python 3.11+ 기반 비동기 수집·번역·브리핑 파이프라인 봇입니다.",
+      "problem": "여러 소스의 피드 업데이트를 중복 없이 안정적으로 수집하고, API 레이트 리밋이나 일시 장애 상황에서도 텔레그램 브리핑 전달을 유지해야 했습니다.",
+      "contribution": "ingestion(feed_fetcher), translation(translator), delivery(telegram_client), storage(state_store·latest_message_store) 계층을 분리하고 asyncio Semaphore 기반 동시 번역 제한과 429 지수 백오프(2s~120s), python-telegram-bot, google-genai, pydantic, tenacity, cachetools, curl-cffi 구성을 구현했습니다.",
+      "outcome": "공개 저장소에 수집→번역→텔레그램 전달 파이프라인 코드와 ruff·pytest 기반 개발 구성이 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/isitnowbot"
+    },
+    {
+      "title": "market-data-skills",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["주식 데이터", "시장 데이터", "카탈로그", "파이프라인", "오픈소스"],
+      "description": "국내외 주식 및 암호화폐 공개 시장 데이터를 조회하는 5종 Provider Agent Skill(NaverStock, TossInvest, Yahoo Finance, Binance, Upbit)을 목적별로 연결하는 카탈로그·라우팅 허브 저장소입니다.",
+      "problem": "여러 시장 데이터 소스를 활용할 때 요청 목적에 맞는 스킬 선택 기준과 읽기 전용 안전 경계(계좌 미접근, untrusted payload 취급, 레이트 리밋 준수)를 일관되게 정의해야 했습니다.",
+      "contribution": "provider-matrix.md 선택 기준과 공통 안전 경계(safety-boundaries.md)를 정리해 각 canonical provider repository를 통합 탐색할 수 있도록 구성했습니다.",
+      "outcome": "공개 저장소에 provider 비교 매트릭스와 안전 경계 문서가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/market-data-skills"
+    },
+    {
+      "title": "yahoo-finance-market-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "yfinance", "Agent Skill"],
+      "tags": ["글로벌 주식", "재무제표", "기술적 지표", "시장 데이터", "오픈소스"],
+      "description": "Python yfinance 라이브러리를 기반으로 글로벌·국내 주가 시세, 과거 OHLCV 차트, 재무제표, 이동평균선(MA)·RSI 등 기술적 분석 지표와 주요 지수·환율·원자재 데이터를 조회하는 Agent Skill입니다.",
+      "problem": "글로벌 주식과 시장 지표를 분석·브리핑 워크플로에서 재현 가능한 Python CLI 형태로 간편하게 조회할 필요가 있었습니다.",
+      "contribution": "yf_market.py Python 스크립트와 브리핑 패턴(briefing-patterns.md), yfinance 기능·제약 분석 문서를 작성했습니다.",
+      "outcome": "공개 저장소에 Python CLI 스크립트와 시장 브리핑 레퍼런스 문서가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/yahoo-finance-market-skill"
+    },
+    {
+      "title": "naverfinance-api-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["주식 데이터", "크롤링", "시세 조회", "뉴스·리서치", "오픈소스"],
+      "description": "구버전 네이버 금융(finance.naver.com·m.stock.naver.com) 화면과 Wisereport 기업분석 HTML 표, 리서치 리포트, 시장지표, Legacy 뉴스를 읽기 전용으로 조회하는 Python 스크립트 기반 Agent Skill입니다.",
+      "problem": "신규 JSON API(naverstock-api-skill)에서 다루지 않는 구버전 HTML 표와 금리·리서치 메뉴를 안전하게 확인·비교할 호환 스크립트가 필요했습니다.",
+      "contribution": "quote.py, financials.py, stock_chart.py, research.py, market_ranking.py 등 10여 종의 Python 조회 스크립트와 selftest.py, 안전 규칙·API 카탈로그, CI 워크플로를 구축했습니다.",
+      "outcome": "공개 저장소에 Python 스크립트 스위트와 GitHub Actions CI가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/naverfinance-api-skill"
+    },
+    {
+      "title": "upbit-read-api-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["암호화폐", "시세 조회", "OHLCV", "레이트 리밋", "오픈소스"],
+      "description": "Upbit Quotation API 기반 현재가 시세, 마켓 코드 목록, 캔들 OHLCV 조회 및 Remaining-Req 레이트 리밋 처리를 읽기 전용으로 다루는 Agent Skill입니다.",
+      "problem": "거래소 API 연동 시 주문·출금 같은 계좌 변경 엔드포인트를 원천 분리하고 Upbit 고유 캔들·레이트 리밋 규격을 준수해야 했습니다.",
+      "contribution": "Quotation read-only 범위 경계와 Remaining-Req 헤더 기반 레이트 리밋 가이드를 구성했습니다.",
+      "outcome": "공개 저장소에 읽기 전용 스킬 문서와 안전 규격이 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/upbit-read-api-skill"
     },
     {
       "title": "ESM 셀러딜 신청 프로세스 개선",

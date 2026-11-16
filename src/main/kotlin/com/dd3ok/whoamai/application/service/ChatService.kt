@@ -5,8 +5,11 @@ import com.dd3ok.whoamai.application.port.out.ChatHistoryRepository
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.domain.ChatHistory
 import com.dd3ok.whoamai.domain.ChatHistoryWindow
+import com.dd3ok.whoamai.application.service.career.CachedAnswerStreamPacer
 import com.dd3ok.whoamai.application.service.career.CareerContextPlanner
 import com.dd3ok.whoamai.application.service.career.CareerPromptAssembler
+import com.dd3ok.whoamai.application.service.career.ChatAnswerCacheCoordinator
+import com.dd3ok.whoamai.common.config.ChatCacheProperties
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.domain.ChatEvent
 import com.dd3ok.whoamai.domain.ChatEventType
@@ -21,15 +24,18 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapNotNull
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 
 @Service
-class ChatService(
+class ChatService @Autowired constructor(
     private val geminiPort: GeminiPort,
     private val chatHistoryRepository: ChatHistoryRepository,
     private val careerContextPlanner: CareerContextPlanner,
     private val careerPromptAssembler: CareerPromptAssembler,
-    private val meterRegistry: MeterRegistry
+    private val meterRegistry: MeterRegistry,
+    private val answerCache: ChatAnswerCacheCoordinator? = null,
+    private val cachedPacer: CachedAnswerStreamPacer? = null
 ) : ChatUseCase {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -59,8 +65,34 @@ class ChatService(
                 loadHistory(userId)
             }
             val pastHistory = ChatHistoryWindow.recentMessages(domainHistory.history, API_WINDOW_TOKENS)
+            stage = "cache_lookup"
+            val cacheLookup = answerCache?.lookup(userPrompt, pastHistory)
+            if (cacheLookup is ChatAnswerCacheCoordinator.LookupResult.Hit) {
+                mode = "cache"
+                meterRegistry.counter(
+                    "whoamai.chat.request.total", "mode", mode,
+                    "retrieval_path", "cache"
+                ).increment()
+                stage = "cache_stream"
+                val pacer = cachedPacer ?: CachedAnswerStreamPacer(ChatCacheProperties())
+                var firstTokenRecorded = false
+                pacer.streamEvents(cacheLookup.entry).collect { event ->
+                    if (event.type == ChatEventType.DELTA && !firstTokenRecorded) {
+                        firstTokenSample.stop(meterRegistry.timer("whoamai.chat.first_token.duration"))
+                        firstTokenRecorded = true
+                    }
+                    emit(event)
+                }
+                stage = "history_save"
+                persistTurn(userId, userPrompt, cacheLookup.entry.answerText, requirePersistence)
+                emit(ChatEvent(ChatEventType.DONE))
+                return@flow
+            }
+
             stage = "retrieval"
-            val plan = careerContextPlanner.plan(userPrompt, pastHistory)
+            // A cache miss on a standalone query runs without unrelated prior history so the cached answer stays reusable across sessions.
+            val planningHistory = if (cacheLookup is ChatAnswerCacheCoordinator.LookupResult.Miss) emptyList() else pastHistory
+            val plan = careerContextPlanner.plan(userPrompt, planningHistory)
             val finalHistory = careerPromptAssembler.assemble(plan.prompt)
             mode = if (plan.prompt.useRagPrompt) "rag" else "chat"
             meterRegistry.counter(
@@ -101,15 +133,12 @@ class ChatService(
             } finally {
                 modelTotalSample?.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
             }
-            check(modelResponseBuilder.isNotBlank()) { "Model returned an empty answer." }
+            val answerText = modelResponseBuilder.toString()
+            check(answerText.isNotBlank()) { "Model returned an empty answer." }
             stage = "history_save"
-            try {
-                saveHistory(userId, userPrompt, modelResponseBuilder.toString())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (requirePersistence) throw e
-                logger.warn("Chat history save failed for legacy stream user {}.", userId, e)
+            persistTurn(userId, userPrompt, answerText, requirePersistence)
+            if (cacheLookup != null) {
+                answerCache.saveIfCacheable(cacheLookup, userPrompt, plan, answerText)
             }
             emit(ChatEvent(ChatEventType.DONE))
         } catch (e: CancellationException) {
@@ -122,6 +151,22 @@ class ChatService(
             throw e
         } finally {
             requestSample.stop(meterRegistry.timer("whoamai.chat.total.duration"))
+        }
+    }
+
+    private suspend fun persistTurn(
+        userId: String,
+        userPrompt: String,
+        answerText: String,
+        requirePersistence: Boolean
+    ) {
+        try {
+            saveHistory(userId, userPrompt, answerText)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (requirePersistence) throw e
+            logger.warn("Chat history save failed for legacy stream user {}.", userId, e)
         }
     }
 

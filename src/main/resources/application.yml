@@ -95,3 +95,13 @@ who-am-ai:
       reasoning-effort: medium
       max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000
+    cache:
+      enabled: true
+      ttl-seconds: 604800
+      max-in-memory-entries: 128
+      initial-delay-min-ms: 450
+      initial-delay-max-ms: 700
+      target-stream-duration-ms: 1600
+      chunk-delay-min-ms: 18
+      chunk-delay-max-ms: 32
+      pause-delay-ms: 60
