@@ -6,8 +6,9 @@ spring:
   ai:
     model:
       chat: openai
-      embedding:
-        text: google-genai
+      # OpenAI and Google use separate selectors; keep only Gemini text embeddings.
+      embedding: none
+      embedding.text: google-genai
     openai:
       base-url: https://generativelanguage.googleapis.com/v1beta/openai
       api-key: ${GEMINI_API_KEY}
