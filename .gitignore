@@ -41,3 +41,6 @@ out/
 
 AGENTS.md
 docs/**/*.md
+.agent/
+.omx/
+_workspace/
