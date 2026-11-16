@@ -11,7 +11,10 @@ class CareerPromptAssembler(
     fun assemble(input: CareerPromptInput): List<ChatMessage> {
         val finalUserPrompt = if (input.useRagPrompt) {
             val context = if (input.sources.isNotEmpty()) {
-                input.sources.joinToString("\n---\n") { "[자료: ${it.title} / ${it.chunkId}]\n${it.content}" }
+                input.sources.joinToString("\n---\n") { source ->
+                    val linkSuffix = source.url?.takeIf { it.isNotBlank() }?.let { " / 링크: $it" }.orEmpty()
+                    "[자료: ${source.title} / ${source.chunkId}$linkSuffix]\n${source.content}"
+                }
             } else if (input.contexts.isNotEmpty()) {
                 input.contexts.joinToString("\n---\n")
             } else {

@@ -1,5 +1,6 @@
 package com.dd3ok.whoamai.application.service.career
 
+import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import org.junit.jupiter.api.Test
@@ -50,6 +51,39 @@ class CareerPromptAssemblerTest {
         val messages = assembler.assemble(input)
 
         assertEquals("CHAT::안녕하세요", messages.single().text)
+    }
+
+    @Test
+    fun `rag plan includes source link when url is present and omits it otherwise`() {
+        val input = CareerPromptInput(
+            history = emptyList(),
+            userPrompt = "개인 프로젝트 알려줘",
+            contexts = emptyList(),
+            useRagPrompt = true,
+            sources = listOf(
+                ResumeSearchResult(
+                    chunkId = "project_lucid",
+                    chunkType = "project",
+                    content = "컨텍스트 점검 도구",
+                    title = "lucid",
+                    url = "https://github.com/dd3ok/lucid"
+                ),
+                ResumeSearchResult(
+                    chunkId = "project_esm",
+                    chunkType = "project",
+                    content = "셀러딜 개선",
+                    title = "ESM 셀러딜",
+                    url = null
+                )
+            )
+        )
+
+        val messages = assembler.assemble(input)
+
+        assertEquals(
+            "RAG::개인 프로젝트 알려줘::[자료: lucid / project_lucid / 링크: https://github.com/dd3ok/lucid]\n컨텍스트 점검 도구\n---\n[자료: ESM 셀러딜 / project_esm]\n셀러딜 개선",
+            messages.single().text
+        )
     }
 
     private object FakePromptProvider : PromptProvider {

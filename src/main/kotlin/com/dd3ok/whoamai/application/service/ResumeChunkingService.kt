@@ -209,6 +209,7 @@ class ResumeChunkingService(
             proj.problem.takeIf { it.isNotBlank() }?.let { contentParts += "해결할 문제: $it" }
             proj.contribution.takeIf { it.isNotBlank() }?.let { contentParts += "본인 기여: $it" }
             proj.outcome.takeIf { it.isNotBlank() }?.let { contentParts += "확인된 결과: $it" }
+            proj.sourceUrl.takeIf { it.isNotBlank() }?.let { contentParts += "저장소 링크: $it" }
             if (proj.skills.isNotEmpty()) {
                 contentParts += "주요 기술은 ${proj.skills.joinToString(", ")} 입니다."
             }

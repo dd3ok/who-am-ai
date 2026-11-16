@@ -92,12 +92,14 @@ class ResumeChunkingServiceTest {
     fun `project evidence is included without requiring it on old records`() {
         val project = Project(
             title = "정산", problem = "플랫폼별 정책 차이",
-            contribution = "전략 패턴으로 정책 분리", outcome = "응답 개선, 정량 수치 미기록"
+            contribution = "전략 패턴으로 정책 분리", outcome = "응답 개선, 정량 수치 미기록",
+            sourceUrl = "https://github.com/dd3ok/example"
         )
         val content = service.generateChunks(Resume(projects = listOf(project))).first { it.type == "project" }.content
         assertTrue(content.contains("해결할 문제: 플랫폼별 정책 차이"))
         assertTrue(content.contains("본인 기여: 전략 패턴으로 정책 분리"))
         assertTrue(content.contains("확인된 결과: 응답 개선, 정량 수치 미기록"))
+        assertTrue(content.contains("저장소 링크: https://github.com/dd3ok/example"))
         val oldProject = jacksonObjectMapper().readValue("""{"title":"기존 프로젝트"}""", Project::class.java)
         assertEquals("", oldProject.contribution)
     }

@@ -88,6 +88,138 @@
       "sourceUrl": "https://github.com/dd3ok/lucid"
     },
     {
+      "title": "cloudflare-mobile-sync-starter",
+      "company": "개인 프로젝트",
+      "skills": ["TypeScript", "Cloudflare Workers", "D1"],
+      "tags": ["인증", "동기화", "모바일 백엔드", "보안", "ADR"],
+      "description": "모바일 앱이 독립된 Cloudflare Workers와 D1 데이터베이스에 배포해 사용할 수 있는 자체 호스팅 인증 및 로컬 우선 증분 동기화 스타터입니다.",
+      "problem": "모바일 클라이언트에서 외부 SaaS 종속 없이 안전한 Google ID 토큰 인증과 제한된 증분 동기화 기준선을 재사용해야 했습니다.",
+      "contribution": "Android Credential Manager 기반 Google ID 토큰 검증, 5분 일회용 nonce의 원자적 소비, Better Auth 세션 발급, Workers·클라이언트 코어 모노레포와 아키텍처·보안 ADR 문서를 구성했습니다.",
+      "outcome": "공개 저장소에 Workers 마이그레이션, 계약 패키지, 로컬 체크 및 ADR 문서가 정리되어 있습니다. 운영 트래픽 수치는 기록되어 있지 않습니다.",
+      "sourceUrl": "https://github.com/dd3ok/cloudflare-mobile-sync-starter"
+    },
+    {
+      "title": "commerce-saga",
+      "company": "개인 프로젝트",
+      "skills": ["Kotlin", "Spring Boot", "Kafka", "PostgreSQL"],
+      "tags": ["MSA", "분산 트랜잭션", "Saga", "Debezium", "CDC"],
+      "description": "Order, Payment, Inventory 서비스와 Orchestrator 서비스 간 Orchestration Saga 패턴을 구현한 분산 트랜잭션 예제 프로젝트입니다.",
+      "problem": "서비스별 데이터베이스가 분리된 환경에서 주문·결제·재고 처리의 원자성과 보상 트랜잭션 흐름을 검증해야 했습니다.",
+      "contribution": "order-service, payment-service, inventory-service, orchestrator-service와 서비스별 PostgreSQL DB, Kafka 및 Debezium Connect 구성을 작성했습니다.",
+      "outcome": "공개 저장소에 멀티 서비스 코드와 Docker Compose 기반 Kafka·Debezium·PostgreSQL 실행 환경이 포함되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/commerce-saga"
+    },
+    {
+      "title": "auth-service",
+      "company": "개인 프로젝트",
+      "skills": ["Kotlin", "Spring Boot", "Spring Security", "Redis"],
+      "tags": ["OAuth 2.0", "JWT", "Redis", "인증", "Hexagonal Architecture"],
+      "description": "OAuth 2.0(Google·Kakao·Naver) 소셜 로그인과 JWT·Redis 기반 분산 세션 관리를 구현한 인증 서버 프로젝트입니다.",
+      "problem": "멀티 소셜 로그인과 Access/Refresh Token 관리, 분산 환경 토큰 동기화를 헥사고날 아키텍처로 구성하고자 했습니다.",
+      "contribution": "Kotlin과 Spring Security 기반 OAuth 2.0 연동, Redis 캐시 토큰 동기화 및 JWT 상태 대시보드를 구현했습니다.",
+      "outcome": "공개 저장소에 인증 서버 코드와 로컬 실행 안내가 포함되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/auth-service"
+    },
+    {
+      "title": "spring-engineering-skills",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Spring Boot", "Agent Skill"],
+      "tags": ["AI 에이전트", "Spring", "코드리뷰", "아키텍처", "보안"],
+      "description": "Spring 및 Spring Boot 엔지니어링을 위해 구현, 베스트 프랙티스 리뷰, 정적 근거 수집, 업그레이드 계획, 성능 분석, 보안 위협 모델링, 테스트 갭, Modulith 감사 8개 워크플로로 분리한 Agent Skills 스위트입니다.",
+      "problem": "단일 대형 프롬프트에 Spring 리뷰와 구현 규칙을 몰아넣으면 컨텍스트 비대화와 검증 누락이 발생합니다.",
+      "contribution": "역할별 8개 스킬과 표준 라이브러리 기반 정적 근거 수집·검증 스크립트, 버전별 호환성 및 릴리스 검증 워크플로를 설계했습니다.",
+      "outcome": "공개 저장소에 CI 검증과 릴리스 태그가 포함된 8종 스킬 패키지가 배포되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/spring-engineering-skills"
+    },
+    {
+      "title": "boring-backend",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["AI 에이전트", "백엔드", "API 설계", "코드리뷰"],
+      "description": "안정적이고 예측 가능한 백엔드 API를 설계·구현·리뷰하기 위한 AI 코딩 에이전트용 Agent Skill입니다.",
+      "problem": "에이전트가 백엔드 API를 작성할 때 경계 조건, 예외 처리, 검증 기준이 작업마다 흔들리는 문제를 줄여야 했습니다.",
+      "contribution": "참고 문서 라우팅, 멀티 런타임 설치 구조, Python 기반 전체 검증 스크립트(`verify_all.py`)와 평가 케이스 정의를 구성했습니다.",
+      "outcome": "공개 저장소에 GitHub Actions 멀티 OS/Python 검증이 연결되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/boring-backend"
+    },
+    {
+      "title": "stash",
+      "company": "개인 프로젝트",
+      "skills": ["JavaScript", "Node.js", "Agent Skill"],
+      "tags": ["AI 에이전트", "CLI", "스킬 관리", "개발 도구"],
+      "description": "평소 에이전트 탐색 경로 밖에 보관한 로컬 Agent Skills 라이브러리를 이름이나 작업 내용으로 검색해 선택한 SKILL.md만 불러오는 도구입니다.",
+      "problem": "모든 스킬 메타데이터를 상시 노출하면 호스트 컨텍스트가 비대해지므로, 필요할 때만 결정론적으로 조회해 불러와야 했습니다.",
+      "contribution": "읽기 전용 카탈로그 검색과 명시적 라이프사이클 CLI(`install`, `activate`, `deactivate`, `doctor`) 및 호스트별 어댑터를 구현했습니다.",
+      "outcome": "공개 저장소에 Node.js 테스트(`test:all`)와 CLI 계약 문서가 포함되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/stash"
+    },
+    {
+      "title": "briefprint",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["AI 에이전트", "문서 브리핑", "캐싱", "개발 도구"],
+      "description": "반복해서 읽는 문서를 지문(fingerprint) 기반 캐시로 저장해 LLM 재호출 없이 brief·digest·executive·action_items 형식으로 재렌더링하는 Agent Skill입니다.",
+      "problem": "긴 문서를 요약 형식을 바꿔 다시 확인하거나 여러 세션에서 재사용할 때 매번 전체 문서를 다시 읽는 비효율이 있었습니다.",
+      "contribution": "문서 지문 기반 캐싱 구조와 다중 출력 포맷 재렌더링 워크플로를 설계·구현했습니다.",
+      "outcome": "공개 저장소에 구현 코드와 문서가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/briefprint"
+    },
+    {
+      "title": "repoclip",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "JavaScript", "FastAPI"],
+      "tags": ["LLM", "개발 도구", "코드리뷰", "WebSocket"],
+      "description": "Git 저장소 전체 구조와 소스 코드를 필터링해 LLM 컨텍스트·코드 리뷰·문서화용 단일 Markdown 또는 텍스트로 내보내는 웹 도구입니다.",
+      "problem": "저장소 구조를 LLM에 전달할 때 불필요한 파일을 제외하고 필요한 확장자·디렉터리만 빠르게 묶어 전달해야 했습니다.",
+      "contribution": "FastAPI 기반 Git 클론·트리 분석 백엔드, WebSocket 세션 단위 임시 저장소 자동 정리, 확장자/디렉터리 필터 UI를 구현했습니다.",
+      "outcome": "공개 저장소에 웹 애플리케이션과 배포 구성이 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/repoclip"
+    },
+    {
+      "title": "no-pair-prgm",
+      "company": "개인 프로젝트",
+      "skills": ["Java", "Spring Boot", "Gemini"],
+      "tags": ["코드리뷰", "GitHub", "자동화", "LLM"],
+      "description": "GitHub Webhook과 Gemini API를 연동해 Pull Request 생성 시 변경 내용을 분석하고 자동으로 리뷰 코멘트를 남기는 프로젝트입니다.",
+      "problem": "혼자 개발할 때도 PR 단위로 자동화된 1차 코드 리뷰 피드백을 빠르게 받아보고자 했습니다.",
+      "contribution": "GitHub Webhook 이벤트 수신, Gemini 기반 코드 분석, GitHub API 리뷰 코멘트 등록 흐름을 구현했습니다.",
+      "outcome": "공개 저장소에 Webhook 연동 및 실행 가이드가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/no-pair-prgm"
+    },
+    {
+      "title": "naverstock-api-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["AI 에이전트", "주식 데이터", "API", "오픈소스"],
+      "description": "네이버 증권의 공개 주식·시장·업비트/빗썸 시세·뉴스·공시 데이터를 에이전트와 Python CLI에서 로그인·계좌 없이 읽기 전용으로 조회하는 Agent Skill입니다.",
+      "problem": "에이전트가 국내외 주식·시장 데이터를 조회할 때 인증이나 쓰기 위험 없이 안전하고 일관된 CLI 인터페이스가 필요했습니다.",
+      "contribution": "표준 라이브러리 기반 HTTP 조회 CLI, 분야별 API 문서·안전 규칙(HTTP 403/429 중단, 토론 식별자 정제) 및 회귀 테스트를 구현했습니다.",
+      "outcome": "공개 저장소에 CI·릴리스가 구성되어 있으며, GitHub에서 10개의 스타를 받은 공개 프로젝트입니다.",
+      "sourceUrl": "https://github.com/dd3ok/naverstock-api-skill"
+    },
+    {
+      "title": "tossinvest-api-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["AI 에이전트", "주식 데이터", "API", "오픈소스"],
+      "description": "토스증권(tossinvest.com)의 공개 주식·시장 데이터를 로그인·계좌 인증 없이 읽기 전용으로 조회하는 경량 Agent Skill 및 Python CLI입니다.",
+      "problem": "비공식 웹 API 기반 시장 조회에서 인증·주문 기능과 분리된 안전한 읽기 전용 경계와 재현 가능한 스크립트가 필요했습니다.",
+      "contribution": "Python CLI 스크립트, 안전 규칙 및 API 카탈로그 문서, 회귀 테스트와 릴리스 파이프라인을 구성했습니다.",
+      "outcome": "공개 저장소에 CI·릴리스가 구성되어 있으며, GitHub에서 5개의 스타를 받은 공개 프로젝트입니다.",
+      "sourceUrl": "https://github.com/dd3ok/tossinvest-api-skill"
+    },
+    {
+      "title": "binance-api-skill",
+      "company": "개인 프로젝트",
+      "skills": ["Python", "Agent Skill"],
+      "tags": ["AI 에이전트", "암호화폐", "REST API", "오픈소스"],
+      "description": "Binance Spot REST API(/api/v3) 엔드포인트 라우팅, 서명(HMAC/RSA/Ed25519), 필터, 레이트 리밋, Testnet 안전 가이드를 제공하는 Agent Skill입니다.",
+      "problem": "코딩 에이전트가 Binance Spot과 Futures/Margin 규격을 혼동하거나 실거래 안전 가드 없이 코드를 생성하는 오류를 막아야 했습니다.",
+      "contribution": "공식 문서 기반 레퍼런스, Spot 범위 경계 지침, 보조 스크립트 및 Testnet 안전 가이드를 구성했습니다.",
+      "outcome": "공개 저장소에 릴리스 및 검증 케이스가 공개되어 있습니다.",
+      "sourceUrl": "https://github.com/dd3ok/binance-api-skill"
+    },
+    {
       "title": "ESM 셀러딜 신청 프로세스 개선",
       "company": "지마켓",
       "period": { "start": "2024-08", "end": "2024-11" },
