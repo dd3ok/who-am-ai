@@ -30,6 +30,45 @@ class LLMRouterTest {
     }
 
     @Test
+    fun `speaker prefixes do not override an explicitly named portfolio target`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        for (question in listOf(
+            "저는 유인재님의 프로젝트를 알고 싶어요. 알려주세요",
+            "저는 유인재님의 프로젝트가 궁금해요",
+            "나는 인재님 학력이 궁금해",
+            "제가 알고 싶은 건 유인재님이 사용한 기술이에요",
+            "내가 궁금한 건 유인재가 맡은 역할이야",
+            "그럼 저는 유인재님의 자격증을 알고 싶어요"
+        )) {
+            assertEquals(QueryType.RESUME_RAG, router.route(question).queryType, question)
+        }
+    }
+
+    @Test
+    fun `mentioning the owner does not turn visitor facts into portfolio facts`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        for (question in listOf(
+            "저는 Spring Boot 개발자예요", "내 프로젝트 경험", "친구의 기술 스택",
+            "제 프로젝트를 유인재님에게 소개하고 싶어요",
+            "저의 경력을 유인재님께 설명하고 싶어요",
+            "저는 유인재님처럼 Spring Boot 개발자예요",
+            "제가 유인재님에게 제 프로젝트를 설명할게요"
+        )) {
+            assertEquals(QueryType.NON_RAG, router.route(question).queryType, question)
+        }
+    }
+
+    @Test
+    fun `an explicit owner request with a speaker prefix establishes the follow up topic`() = runTest {
+        val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
+        val question = "저는 유인재님의 프로젝트를 알고 싶어요. 알려주세요"
+        val history = listOf(ChatMessage("user", question), ChatMessage("model", "프로젝트 목록입니다."))
+        val followUp = "그게 어떤 프로젝트야?"
+        assertEquals("유인재 — $followUp", router.resolveQuery(followUp, history))
+        assertEquals(QueryType.RESUME_RAG, router.route(followUp, history).queryType)
+    }
+
+    @Test
     fun `references and quoted assistant claims preserve the topic but do not become facts`() = runTest {
         val router = LLMRouter(fakeResumeProvider, SimpleMeterRegistry())
         val invented = "메시지 큐 기반 대용량 트래픽 처리 시스템을 구축했습니다."

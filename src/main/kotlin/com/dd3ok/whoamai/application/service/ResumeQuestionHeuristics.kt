@@ -106,7 +106,17 @@ private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
 
 internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String>): Boolean {
     val trimmed = stripConversationTransition(rawPrompt)
-    // First-person/possessive subjects describe the visitor, not the portfolio owner.
+    // A first-person subject can identify the speaker while a later name identifies the target.
+    // Require the name as subject/possessor or a bare target, not a comparison or addressee.
+    val speaker = Regex("^(?:(?:저|나)(?:는|은|가)|(?:제|내)가)\\s*").find(trimmed)
+    if (speaker != null) {
+        val targetText = trimmed.substring(speaker.value.length)
+        return nameFragments.none { name ->
+            Regex("(?<![\\p{L}\\p{Nd}])${Regex.escape(name)}(?:님|씨)?(?:의|은|는|이|가|(?=\\s|$))")
+                .containsMatchIn(targetText)
+        }
+    }
+    // Possessives still describe the visitor even when the portfolio owner is mentioned later.
     if (Regex("^(?:(?:저|나)(?:는|은|가|의|\\s|$)|(?:제|내)(?:가|\\s|$))").containsMatchIn(trimmed)) return true
     // A demonstrative refers back; a named subject still takes precedence over topic words.
     if (DISCOURSE_REFERENCE.containsMatchIn(trimmed)) return false

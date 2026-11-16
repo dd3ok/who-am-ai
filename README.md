@@ -261,7 +261,7 @@ docker run --rm -p 8080:10000 \
 ```
 
 The default `test`/`build` excludes tests tagged `live` and `mongo`, even when production credentials exist in the environment.
-`PortfolioRetrievalEvalTest` runs 65 scenarios over the real resume/chunking/routing/prompt code with in-memory storage
+`PortfolioRetrievalEvalTest` runs 70 scenarios over the real resume/chunking/routing/prompt code with in-memory storage
 and a fake model. It checks selected sources, follow-up behavior, empty-context handling, and source propagation;
 it does **not** measure live vector-search relevance or generated-answer accuracy.
 
