@@ -37,7 +37,7 @@ class PortfolioRetrievalEvalTest {
             runTest {
                 val registry = SimpleMeterRegistry()
                 val model = RecordingModel()
-                val history = MemoryHistory(case.history)
+                val history = MemoryHistory(case.history, case.historyAnswers)
                 val provider = object : ResumeProviderPort {
                     override fun getResume() = resume
                     override fun isInitialized() = true
@@ -64,11 +64,18 @@ class PortfolioRetrievalEvalTest {
                 }
                 assertEquals(ChatEventType.SOURCES, events.first().type)
                 assertEquals(ChatEventType.DONE, events.last().type)
-                val prompt = model.messages.last().text
-                case.sources.forEach { assertTrue(prompt.contains(it), "Missing source in prompt: $it") }
-                case.contextContains.forEach { assertTrue(prompt.contains(it), "Missing context: $it") }
+                assertEquals(case.expectModelCall, model.messages.isNotEmpty(), "Model invocation must require evidence for career answers")
+                if (case.expectModelCall) {
+                    val prompt = model.messages.last().text
+                    case.sources.forEach { assertTrue(prompt.contains(it), "Missing source in prompt: $it") }
+                    case.contextContains.forEach { assertTrue(prompt.contains(it), "Missing context: $it") }
+                }
+                val answer = events.filter { it.type == ChatEventType.DELTA }.joinToString("") { it.content.orEmpty() }
+                case.answerContains.forEach { assertTrue(answer.contains(it), "Missing answer: $it") }
+                assertTrue(answer.isNotBlank())
                 assertEquals(case.question, history.value.history.takeLast(2).first().text)
-                assertEquals("테스트 응답", history.value.history.last().text)
+                assertEquals(answer, history.value.history.last().text)
+                if (case.expectModelCall) assertEquals("테스트 응답", answer)
             }
         }
     }
@@ -77,10 +84,13 @@ class PortfolioRetrievalEvalTest {
         val id: String,
         val question: String,
         val history: List<String> = emptyList(),
+        val historyAnswers: List<String> = emptyList(),
         val mode: String = "rag",
         val sources: List<String>,
         val contextContains: List<String> = emptyList(),
-        val sourceUrls: Map<String, String> = emptyMap()
+        val sourceUrls: Map<String, String> = emptyMap(),
+        val expectModelCall: Boolean = true,
+        val answerContains: List<String> = emptyList()
     )
 
     private class RecordingModel : GeminiPort {
@@ -91,9 +101,9 @@ class PortfolioRetrievalEvalTest {
         }
     }
 
-    private class MemoryHistory(questions: List<String>) : ChatHistoryRepository {
-        var value = ChatHistory("eval", questions.flatMap {
-            listOf(ChatMessage("user", it), ChatMessage("model", "이전 답변"))
+    private class MemoryHistory(questions: List<String>, answers: List<String>) : ChatHistoryRepository {
+        var value = ChatHistory("eval", questions.flatMapIndexed { index, question ->
+            listOf(ChatMessage("user", question), ChatMessage("model", answers.getOrElse(index) { "이전 답변" }))
         })
         override suspend fun findByUserId(userId: String) = value
         override suspend fun save(chatHistory: ChatHistory): ChatHistory {

@@ -8,6 +8,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = [
+        "spring.ai.openai.api-key=dummy",
         "spring.ai.google.genai.api-key=dummy",
         "spring.ai.google.genai.embedding.api-key=dummy",
         "spring.mongodb.uri=mongodb://192.0.2.1:27017/whoam_ai?serverSelectionTimeoutMS=1000&connectTimeoutMS=1000&socketTimeoutMS=1000",

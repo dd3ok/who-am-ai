@@ -47,10 +47,8 @@ private fun isLikelyResumeQuestion(
     resume: Resume,
     nameFragments: Set<String> = NameFragmentExtractor.extract(resume.name)
 ): Boolean {
-    if (!looksLikeQuestionOrRequest(rawPrompt, normalizedPrompt)) {
-        return false
-    }
-
+    // A portfolio topic can be a fragment, statement or request with trailing detail.
+    // Ownership and subject matter decide retrieval, not punctuation or sentence endings.
     val hasNamedTarget = NameFragmentExtractor.matches(normalizedPrompt, nameFragments)
     val hasDirectTarget = hasNamedTarget ||
         DIRECT_TARGET_TOKENS.any { normalizedPrompt.contains(it) }
@@ -82,15 +80,6 @@ private fun isLikelyResumeQuestion(
         (hasDocumentSignal && (hasDirectTarget || hasResumeEntity))
 }
 
-private fun looksLikeQuestionOrRequest(rawPrompt: String, normalizedPrompt: String): Boolean {
-    val trimmed = rawPrompt.trim()
-    if (trimmed.contains('?') || trimmed.contains('？')) {
-        return true
-    }
-    return QUESTION_OR_REQUEST_ENDINGS.any { normalizedPrompt.endsWith(it) } ||
-        QUESTION_OR_REQUEST_CONTAINS.any { normalizedPrompt.contains(it) }
-}
-
 private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
     val experienceHit = resume.experiences.any { exp ->
         containsResumeTerm(rawPrompt, exp.company) ||
@@ -117,9 +106,21 @@ private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
 
 internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<String>): Boolean {
     val trimmed = stripConversationTransition(rawPrompt)
-    // References such as "결과는?" do not name a new external subject.
-    if (isFollowUpQuestion(trimmed)) return false
-    val match = Regex("^([\\p{L}\\p{Nd}\\-+.]+?)(은|는|이|가)").find(trimmed) ?: return false
+    // A first-person subject can identify the speaker while a later name identifies the target.
+    // Require the name as subject/possessor or a bare target, not a comparison or addressee.
+    val speaker = Regex("^(?:(?:저|나)(?:는|은|가)|(?:제|내)가)\\s*").find(trimmed)
+    if (speaker != null) {
+        val targetText = trimmed.substring(speaker.value.length)
+        return nameFragments.none { name ->
+            Regex("(?<![\\p{L}\\p{Nd}])${Regex.escape(name)}(?:님|씨)?(?:의|은|는|이|가|(?=\\s|$))")
+                .containsMatchIn(targetText)
+        }
+    }
+    // Possessives still describe the visitor even when the portfolio owner is mentioned later.
+    if (Regex("^(?:(?:저|나)(?:는|은|가|의|\\s|$)|(?:제|내)(?:가|\\s|$))").containsMatchIn(trimmed)) return true
+    // A demonstrative refers back; a named subject still takes precedence over topic words.
+    if (DISCOURSE_REFERENCE.containsMatchIn(trimmed)) return false
+    val match = Regex("^([\\p{L}\\p{Nd}\\-+.]+?)(은|는|이|가|의)").find(trimmed) ?: return false
     val subject = normalizeResumeQuery(match.groupValues[1])
         .removeSuffix(normalizeResumeQuery("님"))
         .removeSuffix(normalizeResumeQuery("씨"))
@@ -131,25 +132,29 @@ internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<Strin
     if (SELF_CONTAINED_PROFILE_KEYWORDS.any { subject.contains(it) }) return false
     if (DOCUMENT_SIGNAL_KEYWORDS.any { subject.contains(it) }) return false
     if (BROAD_CAPABILITY_KEYWORDS.any { subject.contains(it) }) return false
+    if (WORK_DETAIL_KEYWORDS.any { subject.contains(it) }) return false
     return true
 }
 
 internal fun isFollowUpQuestion(prompt: String): Boolean {
-    // A transition word alone does not refer back to the previous project or company.
-    val normalized = normalizeResumeQuery(stripConversationTransition(prompt))
-    if (listOf(
-        "거기", "그프로젝트", "그회사", "그때", "그중", "왜그렇게", "왜그걸",
-        "더자세", "조금더", "자세히"
-    ).any { normalized.startsWith(it) } ||
-        Regex("^(?:어떤|무슨)?(?:성과|역할|결과|이유)(?:은|는|이|가|을|를|도|$)").containsMatchIn(normalized)
-    ) return true
+    val text = stripConversationTransition(prompt)
+    val normalized = normalizeResumeQuery(text)
+    if (listOf("공부", "작성", "추천").any { normalized.contains(it) }) return false
 
-    // Omitted subjects can still refer to work already discussed; general advice starts a new topic.
-    return Regex(
-        "^(?:(?:사용|활용|도입)(?:한|했던)(?:기술|스택|도구)|(?:가장|제일)?어려웠던(?:점|부분))"
-    ).containsMatchIn(normalized) &&
-        !listOf("공부", "작성", "추천").any { normalized.contains(it) }
+    // Demonstratives refer to prior discourse; a transition ("그럼") alone does not.
+    if (DISCOURSE_REFERENCE.containsMatchIn(text) ||
+        listOf("더자세", "조금더", "자세히").any { normalized.startsWith(it) }) return true
+
+    // Reuse topic categories rather than enumerate every wording of a work-detail question.
+    val workDetail = (BROAD_CAPABILITY_KEYWORDS + WORK_DETAIL_KEYWORDS).any { normalized.contains(it) }
+    val standaloneProfileTopic = SELF_CONTAINED_PROFILE_KEYWORDS
+        .filterNot { it in WORK_DETAIL_KEYWORDS }
+        .any { normalized.contains(it) }
+    return workDetail && !standaloneProfileTopic
 }
+
+private val WORK_DETAIL_KEYWORDS = listOf("결과", "이유", "기술", "스킬", "스택", "도구", "어려웠")
+private val DISCOURSE_REFERENCE = Regex("^(?:(?:그|이)(?:\\s+|것|거|게|건|때|중|곳|프로젝트|회사)|거기|왜\\s*(?:그|이))")
 
 private fun stripConversationTransition(prompt: String): String =
     prompt.trim().replace(Regex("^(?:(?:그래서|그럼)[\\s,，]*)+"), "")
@@ -189,19 +194,6 @@ private val SERVICE_IMPLEMENTATION_KEYWORDS = listOf(
 
 private val SERVICE_INTRO_KEYWORDS = listOf(
     "뭐야", "무엇", "소개", "설명", "정체", "서비스"
-).map(::normalizeResumeQuery)
-
-private val QUESTION_OR_REQUEST_ENDINGS = listOf(
-    "알려줘", "알려주세요", "말해줘", "말해주세요", "설명해줘", "설명해주세요",
-    "정리해줘", "정리해주세요", "소개해줘", "소개해주세요", "요약해줘", "요약해주세요", "보여줘", "보여주세요",
-    "뭐야", "뭐지", "누구야", "누구지", "몇년이야", "몇년있어", "궁금해", "궁금하다",
-    "해줘", "있어", "인가", "인지", "했어", "하나요", "한가요", "인가요", "있나요",
-    "사용하나요", "사용할수있나요", "쓸수있나요", "할수있나요"
-).map(::normalizeResumeQuery)
-
-private val QUESTION_OR_REQUEST_CONTAINS = listOf(
-    "알수있", "무슨역할", "어떤일", "몇년", "얼마나", "무엇", "뭐가", "뭐를",
-    "어떤", "무슨", "사용할수있", "쓸수있"
 ).map(::normalizeResumeQuery)
 
 private val TARGETED_INTRO_PATTERNS = listOf(

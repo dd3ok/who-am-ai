@@ -31,7 +31,7 @@ class DefaultDeepHealthService(
     private val mongoProbeProvider: ObjectProvider<DeepHealthMongoProbe>,
     private val vectorStorePropertiesProvider: ObjectProvider<MongoDBAtlasVectorStoreProperties>,
     @Value("\${spring.mongodb.uri:}") private val mongoUri: String,
-    @Value("\${spring.ai.google.genai.api-key:}") private val geminiApiKey: String,
+    @Value("\${spring.ai.openai.api-key:}") private val chatApiKey: String,
     @Value("\${spring.ai.google.genai.embedding.api-key:}") private val embeddingApiKey: String
 ) : DeepHealthService {
 
@@ -39,14 +39,14 @@ class DefaultDeepHealthService(
         val mongo = mongoStatus()
         val vector = vectorStatus(mongo.status == UP)
         val resume = resumeStatus()
-        val gemini = configuredStatus(geminiApiKey, "configured", "api key missing")
+        val chat = configuredStatus(chatApiKey, "configured", "api key missing")
         val embedding = configuredStatus(embeddingApiKey, "configured", "api key missing")
 
         val components = mapOf(
             "mongo" to mongo,
             "vector" to vector,
             "resume" to resume,
-            "gemini" to gemini,
+            "chat_model" to chat,
             "embedding" to embedding
         )
         val status = if (components.values.any { it.status == DOWN }) DOWN else UP

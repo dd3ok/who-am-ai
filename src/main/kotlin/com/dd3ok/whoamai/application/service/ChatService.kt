@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapNotNull
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -34,8 +35,9 @@ class ChatService(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     private companion object {
-        const val API_WINDOW_TOKENS = 2048
-        const val PERSISTENCE_WINDOW_TOKENS = 8192
+        // The character-based estimate is conservative; retain the user turn preceding an 8K-token answer.
+        const val API_WINDOW_TOKENS = 65536
+        const val PERSISTENCE_WINDOW_TOKENS = 131072
     }
 
     override suspend fun streamChatResponse(message: StreamMessage): Flow<String> =
@@ -74,16 +76,22 @@ class ChatService(
                 ChatSource(it.chunkId, it.title, it.url)
             }))
 
-            // 4. LLM 호출 및 결과 스트리밍
-            stage = "gemini"
+            // Missing portfolio evidence is a deterministic boundary, not a model suggestion.
+            val missingEvidence = plan.prompt.useRagPrompt && plan.prompt.contexts.none { it.isNotBlank() }
+            stage = if (missingEvidence) "grounding" else "gemini"
             val modelResponseBuilder = StringBuilder()
-            val modelFirstTokenSample = Timer.start(meterRegistry)
-            val modelTotalSample = Timer.start(meterRegistry)
+            val modelFirstTokenSample = if (missingEvidence) null else Timer.start(meterRegistry)
+            val modelTotalSample = if (missingEvidence) null else Timer.start(meterRegistry)
             var firstTokenRecorded = false
             try {
-                geminiPort.generateChatContent(finalHistory).collect { chunk ->
+                val response = if (missingEvidence) {
+                    flowOf("확인 가능한 경력 자료에서 해당 내용을 찾지 못했습니다. 회사나 프로젝트를 구체적으로 알려주시면 기록된 범위에서 안내해 드리겠습니다.")
+                } else {
+                    geminiPort.generateChatContent(finalHistory)
+                }
+                response.collect { chunk ->
                     if (!firstTokenRecorded) {
-                        modelFirstTokenSample.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
+                        modelFirstTokenSample?.stop(meterRegistry.timer("whoamai.chat.gemini.first_token.duration"))
                         firstTokenSample.stop(meterRegistry.timer("whoamai.chat.first_token.duration"))
                         firstTokenRecorded = true
                     }
@@ -91,7 +99,7 @@ class ChatService(
                     emit(ChatEvent(ChatEventType.DELTA, content = chunk))
                 }
             } finally {
-                modelTotalSample.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
+                modelTotalSample?.stop(meterRegistry.timer("whoamai.chat.gemini.total.duration"))
             }
             check(modelResponseBuilder.isNotBlank()) { "Model returned an empty answer." }
             stage = "history_save"

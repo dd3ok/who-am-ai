@@ -12,7 +12,6 @@ import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
-import org.springframework.ai.google.genai.GoogleGenAiChatOptions
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -21,8 +20,8 @@ import kotlin.test.assertTrue
 class GeminiAdapterTest {
 
     @Test
-    fun `default max output tokens is compact for chat responses`() {
-        assertEquals(2048, GeminiChatModelProperties().maxOutputTokens)
+    fun `default max output tokens allows detailed chat responses`() {
+        assertEquals(8192, GeminiChatModelProperties().maxOutputTokens)
     }
 
     @Test
@@ -290,7 +289,7 @@ class GeminiAdapterTest {
         val requestedModels = mutableListOf<String>()
 
         override fun stream(prompt: Prompt): Flux<ChatResponse> {
-            requestedModels += (prompt.options as GoogleGenAiChatOptions).model
+            requestedModels += requireNotNull(prompt.options?.model)
             val response = responses.getOrElse(callCount) { Flux.error(IllegalStateException("unexpected call")) }
             callCount += 1
             return response

@@ -25,7 +25,7 @@ dependencies {
 
     // Spring AI
     implementation(platform("org.springframework.ai:spring-ai-bom:2.0.0"))
-    implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
+    implementation("org.springframework.ai:spring-ai-starter-model-openai")
     implementation("org.springframework.ai:spring-ai-starter-model-google-genai-embedding")
     implementation("org.springframework.ai:spring-ai-starter-vector-store-mongodb-atlas")
 
@@ -79,7 +79,7 @@ tasks.register<Test>("mongoTest") {
 }
 
 tasks.register<Test>("liveEval") {
-    description = "Runs opt-in Gemini / MongoDB evaluations against EVAL_MONGO_URI. Reindexes the evaluation database."
+    description = "Runs opt-in chat / Gemini embedding / MongoDB evaluations against EVAL_MONGO_URI. Reindexes the evaluation database."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath

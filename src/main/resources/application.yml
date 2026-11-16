@@ -5,20 +5,24 @@ spring:
     uri: ${MONGO_URI:}
   ai:
     model:
-      chat: google-genai
+      chat: openai
       embedding:
         text: google-genai
+    openai:
+      base-url: https://generativelanguage.googleapis.com/v1beta/openai
+      api-key: ${GEMINI_API_KEY}
+      timeout: 110s
+      max-retries: 0
+      chat:
+        model: gemini-3.8-flash
+        reasoning-effort: medium
+        max-tokens: 8192
     google:
       genai:
-        api-key: ${GEMINI_API_KEY}
-        chat:
-          # Spring AI provider default for auto-configuration.
-          # Runtime fallback order is owned by who-am-ai.ai.chat below.
-          model: gemini-3.1-flash-lite
-          temperature: 0.75
-          max-output-tokens: 2048
+        # Preserve the embedding model and dimensions used by existing Atlas vectors.
+        api-key: ${GEMINI_EMBEDDING_API_KEY:${GEMINI_API_KEY:}}
         embedding:
-          api-key: ${GEMINI_API_KEY:${spring.ai.google.genai.api-key:}}
+          api-key: ${spring.ai.google.genai.api-key}
           text:
             model: gemini-embedding-001
             dimensions: 768
@@ -65,7 +69,7 @@ websocket:
   max-message-bytes: 65536
   max-content-length: 4000
   max-uuid-length: 128
-  response-timeout-ms: 45000
+  response-timeout-ms: 120000
   allowed-origins:
     - https://dd3ok.github.io
     - http://localhost:3000
@@ -85,10 +89,9 @@ rag:
 who-am-ai:
   ai:
     chat:
-      # GeminiAdapter uses these values for each request and fallback attempt.
-      # Stable-first Gemini defaults. Check live availability, pricing, and quota:
-      # https://aistudio.google.com/app/usage
-      models: [gemini-3.1-flash-lite, gemini-2.5-flash-lite, gemini-3.5-flash, gemini-2.5-flash]
-      temperature: 0.75
-      max-output-tokens: 2048
+      # The existing streaming adapter applies these options to the configured Spring AI provider.
+      # https://ai.google.dev/gemini-api/docs/openai#thinking
+      models: [gemini-3.8-flash]
+      reasoning-effort: medium
+      max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000

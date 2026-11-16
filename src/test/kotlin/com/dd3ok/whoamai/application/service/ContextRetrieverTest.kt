@@ -171,7 +171,8 @@ class ContextRetrieverTest {
         val result = contextRetriever.retrieveByRule("너는 뭐로 만들어졌어?")
 
         assertEquals(1, result.size)
-        assertTrue(result.first().contains("Google Gemini"))
+        assertTrue(result.first().contains("Google Gemini 3.8 Flash"))
+        assertTrue(result.first().contains("Gemini 임베딩"))
     }
 
     @Test

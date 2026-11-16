@@ -63,24 +63,30 @@ class ChatServiceTest {
     }
 
     @Test
-    fun `resume intent with empty context stays in grounded rag prompt`() = runTest {
+    fun `resume intent without evidence cannot invoke a model or reuse an invented history claim`() = runTest {
         val geminiPort = RecordingGeminiPort()
-        val service = createService(geminiPort = geminiPort)
+        val repository = InMemoryChatHistoryRepository()
+        repository.seed("user-1", ChatHistory("user-1", listOf(
+            ChatMessage("user", "유인재의 경력 알려줘"),
+            ChatMessage("model", "존재하지 않는 대용량 시스템을 구축했습니다.")
+        )))
+        val service = createService(geminiPort = geminiPort, chatHistoryRepository = repository)
 
-        service.streamChatResponse(
+        val answer = service.streamChatResponse(
             StreamMessage(uuid = "user-1", type = MessageType.USER, content = "유인재의 백엔드 아키텍처 관련 강점이 뭐야?")
-        ).toList()
+        ).toList().joinToString("")
 
-        val finalPrompt = geminiPort.lastHistory.last().text
-        assertTrue(finalPrompt.startsWith("RAG::"), "Expected grounded RAG prompt fallback, but was: $finalPrompt")
-        assertTrue(finalPrompt.contains("관련 정보 없음"), "Expected empty context marker, but was: $finalPrompt")
+        assertTrue(geminiPort.lastHistory.isEmpty(), "Missing evidence must not reach the model")
+        assertTrue(answer.contains("확인 가능한 경력 자료"))
+        assertTrue(!answer.contains("대용량 시스템"))
+        assertEquals(answer, repository.findByUserId("user-1")!!.history.last().text)
     }
 
     @Test
     fun `saved chat history is trimmed before persistence`() = runTest {
         val geminiPort = RecordingGeminiPort()
         val chatHistoryRepository = InMemoryChatHistoryRepository()
-        val longMessage = "a".repeat(2000)
+        val longMessage = "a".repeat(20000)
         val existingHistory = List(8) { index ->
             ChatMessage(
                 role = if (index % 2 == 0) "user" else "model",
@@ -266,6 +272,26 @@ class ChatServiceTest {
 
         val finalPrompt = geminiPort.lastHistory.last().text
         assertTrue(finalPrompt.startsWith("RAG::"), "Expected RAG prompt for history follow-up, but was: $finalPrompt")
+        assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
+    }
+
+    @Test
+    fun `long answer does not erase the user topic needed for the next follow up`() = runTest {
+        val repository = InMemoryChatHistoryRepository()
+        val persistencePort = HistoryAwareResumePersistencePort()
+        var responseCount = 0
+        val model = object : GeminiPort {
+            override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> =
+                flowOf(if (responseCount++ == 0) "a".repeat(40000) else "후속 응답")
+        }
+        val service = createService(model, repository, SampleResumeProviderPort(), persistencePort)
+
+        service.streamChatEvents(StreamMessage("long-answer", MessageType.USER, "지마켓 경력 알려줘")).toList()
+        val saved = repository.findByUserId("long-answer") ?: error("history not saved")
+        assertTrue(saved.history.any { it.role == "user" && it.text == "지마켓 경력 알려줘" })
+
+        val events = service.streamChatEvents(StreamMessage("long-answer", MessageType.USER, "그럼 사용한 기술은?")).toList()
+        assertEquals(ChatEventType.DONE, events.last().type)
         assertTrue(persistencePort.lastQuery?.contains("지마켓") == true)
     }
 
