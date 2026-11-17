@@ -344,6 +344,7 @@
     },
     {
       "title": "ESM+ 부정 로그인 탐지(ATO) 도입",
+      "aliases": ["ATO", "부정 로그인 탐지"],
       "company": "지마켓",
       "period": { "start": "2022-06", "end": "2022-08" },
       "skills": [".NET", "Spring Boot", "SQL Server", "Redis", "jQuery"],
@@ -352,14 +353,16 @@
     },
     {
       "title": "삼성전자로지텍 설치지원시스템(BISS) 개편",
+      "aliases": ["BISS", "삼성전자로지텍", "설치지원시스템"],
       "company": "미라콤아이앤씨",
       "period": { "start": "2021-06", "end": "2021-08" },
       "skills": ["JSP", "jQuery", "Oracle"],
-      "tags": ["로지텍", "설치지원", "레거시", "클린코드", "SI"],
+      "tags": ["삼성전자", "BISS", "로지텍", "설치지원", "레거시", "클린코드", "SI"],
       "description": "설치기사 현장 발주/품의 관리 시스템을 개편하고, 메뉴 전반을 리팩터링해 클린코드를 적용했습니다."
     },
     {
       "title": "삼성전자 입찰견적관리시스템(BQMS) – MRO 몰/2.0",
+      "aliases": ["BQMS", "MRO 몰", "MRO 2.0", "입찰견적관리시스템"],
       "company": "미라콤아이앤씨",
       "period": { "start": "2018-01", "end": "2021-05" },
       "skills": ["Spring", "JSP", "jQuery", "Oracle"],

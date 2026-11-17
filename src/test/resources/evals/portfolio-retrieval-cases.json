@@ -72,5 +72,9 @@
   {"id":"commerce-saga-project","question":"commerce-saga는 어떤 프로젝트야?","sources":["project_commerce_saga"],"contextContains":["https://github.com/dd3ok/commerce-saga"],"sourceUrls":{"project_commerce_saga":"https://github.com/dd3ok/commerce-saga"}},
   {"id":"naverstock-skill-project","question":"naverstock-api-skill은 어떤 프로젝트야?","sources":["project_naverstock_api_skill"],"contextContains":["https://github.com/dd3ok/naverstock-api-skill"],"sourceUrls":{"project_naverstock_api_skill":"https://github.com/dd3ok/naverstock-api-skill"}},
   {"id":"post-resignation-python-pipeline","question":"퇴사 이후 진행한 Python 파이프라인 작업도 소개해 주세요","sources":["recent_activities"],"contextContains":["isitnowbot","market-data-skills"]},
-  {"id":"ai-project-follow-up","question":"그래서 성과는?","history":["savepoint 설명해줘"],"sources":["project_savepoint"],"contextContains":["코드 정확성을 보증하지는 않습니다"]}
+  {"id":"ai-project-follow-up","question":"그래서 성과는?","history":["savepoint 설명해줘"],"sources":["project_savepoint"],"contextContains":["코드 정확성을 보증하지는 않습니다"]},
+  {"id":"samsung-bqms-biss-shorthand","question":"삼성전자 BQMS와 BISS 개발·운영 경험을 알려주세요","sources":["project_삼성전자로지텍_설치지원시스템_BISS_개편","project_삼성전자_입찰견적관리시스템_BQMS_MRO_몰_2_0"],"contextContains":["설치기사 현장 발주","MRO 자재 구매몰"]},
+  {"id":"biss-subject-shorthand","question":"BISS는 어떤 프로젝트야?","sources":["project_삼성전자로지텍_설치지원시스템_BISS_개편"],"contextContains":["삼성전자로지텍 설치지원시스템(BISS) 개편"]},
+  {"id":"bqms-follow-up","question":"그럼 사용한 기술은?","history":["BQMS 설명해줘"],"sources":["project_삼성전자_입찰견적관리시스템_BQMS_MRO_몰_2_0"],"contextContains":["Oracle"]},
+  {"id":"ato-shorthand","question":"ATO 도입에서 뭘 했어?","sources":["project_ESM_부정_로그인_탐지_ATO_도입"],"contextContains":["인터리젠 ATO"]}
 ]

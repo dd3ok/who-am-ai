@@ -67,12 +67,12 @@ class LLMRouter(
         val names = NameFragmentExtractor.extract(resume.name)
         if ((!quotedAnswer && hasExternalNamedSubject(userPrompt, names)) ||
             NameFragmentExtractor.matches(normalized, names) ||
-            explicitTopics(normalized, resume).isNotEmpty()
+            explicitTopics(userPrompt, resume).isNotEmpty()
         ) return userPrompt
 
         for (message in history.asReversed().filter { it.role == "user" }.take(6)) {
             val previous = normalizeResumeQuery(message.text)
-            val topics = explicitTopics(previous, resume)
+            val topics = explicitTopics(message.text, resume)
             if (topics.isEmpty() && isFollowUpQuestion(message.text) && !hasExternalNamedSubject(message.text, names)) continue
             // A topic switch ends the chain; never resurrect an older company from unrelated conversation.
             if (!isLikelyOwnDomainQuestion(message.text, previous, resume, names)) return userPrompt
@@ -82,12 +82,13 @@ class LLMRouter(
         return userPrompt
     }
 
-    private fun explicitTopics(query: String, resume: com.dd3ok.whoamai.domain.Resume): List<String> {
-        val projects = resume.projects.filter { it.title.isNotBlank() && query.contains(normalizeResumeQuery(it.title)) }
+    private fun explicitTopics(rawQuery: String, resume: com.dd3ok.whoamai.domain.Resume): List<String> {
+        val normalizedQuery = normalizeResumeQuery(rawQuery)
+        val projects = resume.projects.filter { matchesProjectQuery(rawQuery, it, normalizedQuery) }
         if (projects.isNotEmpty()) return projects.map { it.title }.distinct()
         return resume.experiences.filter { exp ->
-            exp.company.isNotBlank() && (query.contains(normalizeResumeQuery(exp.company)) ||
-                exp.aliases.any { it.isNotBlank() && query.contains(normalizeResumeQuery(it)) })
+            exp.company.isNotBlank() && (normalizedQuery.contains(normalizeResumeQuery(exp.company)) ||
+                exp.aliases.any { it.isNotBlank() && normalizedQuery.contains(normalizeResumeQuery(it)) })
         }.map { it.company }.distinct()
     }
 
@@ -116,7 +117,7 @@ class LLMRouter(
         if (companyHit) return true
 
         val projectHit = resume.projects.any { proj ->
-            normalizedPrompt.contains(normalizeResumeQuery(proj.title)) ||
+            matchesProjectQuery(userPrompt, proj, normalizedPrompt) ||
                 proj.skills.any { skill -> containsResumeTerm(userPrompt, skill) } ||
                 proj.tags.any { tag -> containsResumeTerm(userPrompt, tag) }
         }
@@ -146,7 +147,7 @@ class LLMRouter(
             .distinct()
 
         val matchedProjects = resume.projects
-            .filter { project -> normalizedPrompt.contains(normalizeResumeQuery(project.title)) }
+            .filter { project -> matchesProjectQuery(userPrompt, project, normalizedPrompt) }
             .map { it.title }
             .distinct()
 

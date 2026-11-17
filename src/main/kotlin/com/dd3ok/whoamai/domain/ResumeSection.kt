@@ -26,6 +26,7 @@ data class Experience(val company: String = "", val aliases: List<String> = empt
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class Project(
     val title: String = "",
+    val aliases: List<String> = emptyList(),
     val company: String = "",
     val period: Period = Period(),
     val skills: List<String> = emptyList(),

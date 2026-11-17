@@ -6,6 +6,7 @@ import com.dd3ok.whoamai.application.service.LLMRouter
 import com.dd3ok.whoamai.application.service.OwnDomainProfileProvider
 import com.dd3ok.whoamai.application.service.containsResumeTerm
 import com.dd3ok.whoamai.application.service.isOwnServiceQuestion
+import com.dd3ok.whoamai.application.service.matchesProjectQuery
 import com.dd3ok.whoamai.application.service.normalizeResumeQuery
 import com.dd3ok.whoamai.common.config.ChatCacheProperties
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
@@ -121,7 +122,7 @@ class ChatAnswerCacheCoordinator(
         }
         if (companyHit) return true
 
-        val projectHit = resume.projects.any { containsResumeTerm(rawPrompt, it.title) }
+        val projectHit = resume.projects.any { matchesProjectQuery(rawPrompt, it, normalizedPrompt) }
         if (projectHit) return true
 
         val ownerMatch = NameFragmentExtractor.matches(normalizedPrompt, NameFragmentExtractor.extract(resume.name))

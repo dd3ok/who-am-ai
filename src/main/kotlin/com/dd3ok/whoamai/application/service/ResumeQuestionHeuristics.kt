@@ -1,7 +1,23 @@
 package com.dd3ok.whoamai.application.service
 
 import com.dd3ok.whoamai.common.util.NameFragmentExtractor
+import com.dd3ok.whoamai.domain.Project
 import com.dd3ok.whoamai.domain.Resume
+
+private val PARENTHETICAL_PROJECT_CODE_REGEX = Regex("\\(([^()]{2,32})\\)")
+
+internal fun matchesProjectQuery(
+    rawPrompt: String,
+    project: Project,
+    normalizedPrompt: String = normalizeResumeQuery(rawPrompt)
+): Boolean {
+    if (project.title.isBlank()) return false
+    if (normalizedPrompt.contains(normalizeResumeQuery(project.title))) return true
+    if (project.aliases.any { alias -> containsResumeTerm(rawPrompt, alias) }) return true
+    return PARENTHETICAL_PROJECT_CODE_REGEX.findAll(project.title)
+        .map { it.groupValues[1].trim() }
+        .any { code -> containsResumeTerm(rawPrompt, code) }
+}
 
 internal fun normalizeResumeQuery(text: String): String =
     text.lowercase()
@@ -55,7 +71,7 @@ private fun isLikelyResumeQuestion(
     val hasResumeEntity = hasResumeEntityHit(rawPrompt, resume)
     val hasOwnWorkTarget = resume.experiences.any { exp ->
         containsResumeTerm(rawPrompt, exp.company) || exp.aliases.any { containsResumeTerm(rawPrompt, it) }
-    } || resume.projects.any { containsResumeTerm(rawPrompt, it.title) }
+    } || resume.projects.any { matchesProjectQuery(rawPrompt, it, normalizedPrompt) }
     val hasExternalSubject = hasExternalNamedSubject(rawPrompt, nameFragments)
     val hasSelfContainedProfileSignal = SELF_CONTAINED_PROFILE_KEYWORDS.any { normalizedPrompt.contains(it) }
     val hasBroadCapabilitySignal = BROAD_CAPABILITY_KEYWORDS.any { normalizedPrompt.contains(it) }
@@ -88,7 +104,7 @@ private fun hasResumeEntityHit(rawPrompt: String, resume: Resume): Boolean {
     if (experienceHit) return true
 
     val projectHit = resume.projects.any { project ->
-        containsResumeTerm(rawPrompt, project.title) ||
+        matchesProjectQuery(rawPrompt, project) ||
             containsResumeTerm(rawPrompt, project.company) ||
             project.skills.any { skill -> containsResumeTerm(rawPrompt, skill) } ||
             project.tags.any { tag -> containsResumeTerm(rawPrompt, tag) }

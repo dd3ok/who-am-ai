@@ -326,6 +326,37 @@ class ContextRetrieverTest {
         }
     }
 
+    @Test
+    fun `project aliases and parenthetical codes match rule retrieval even without project keyword`() = runTest {
+        val biss = Project(
+            title = "삼성전자로지텍 설치지원시스템(BISS) 개편",
+            company = "미라콤아이앤씨"
+        )
+        val bqms = Project(
+            title = "삼성전자 입찰견적관리시스템(BQMS) – MRO 몰/2.0",
+            aliases = listOf("MRO 몰"),
+            company = "미라콤아이앤씨"
+        )
+        val provider = object : ResumeProviderPort {
+            override fun getResume() = resume.copy(projects = listOf(biss, bqms))
+            override fun isInitialized() = true
+        }
+        val bissId = ChunkIdGenerator.forProject(biss.title)
+        val bqmsId = ChunkIdGenerator.forProject(bqms.title)
+        persistencePort.stub(bissId, "BISS_CONTENT")
+        persistencePort.stub(bqmsId, "BQMS_CONTENT")
+
+        val retriever = ContextRetriever(persistencePort, provider, ownDomainProfileProvider, true)
+        assertEquals(
+            setOf(bissId, bqmsId),
+            retriever.retrieveSourcesByRule("삼성전자 BQMS와 BISS 개발·운영 경험을 알려주세요").map { it.chunkId }.toSet()
+        )
+        assertEquals(
+            listOf(bqmsId),
+            retriever.retrieveSourcesByRule("MRO 몰 개발 경험 알려줘").map { it.chunkId }
+        )
+    }
+
     private class FakeResumePersistencePort : ResumePersistencePort {
         private val contents = mutableMapOf<String, String>()
         var vectorResults: List<ResumeSearchResult> = emptyList()

@@ -57,7 +57,7 @@ class ContextRetriever(
         val resume = resumeProviderPort.getResume()
         val names = NameFragmentExtractor.extract(resume.name)
         fun workTopics(query: String): List<ConversationTopic> {
-            val projects = resume.projects.filter { containsResumeTerm(query, it.title) }
+            val projects = resume.projects.filter { matchesProjectQuery(query, it) }
             if (projects.isNotEmpty()) return projects.map {
                 ConversationTopic(it.title, listOf(ChunkIdGenerator.forProject(it.title)))
             }
@@ -114,8 +114,8 @@ class ContextRetriever(
             return emptyList()
         }
 
-        // 1. Specific project title check
-        val matchedProjects = resume.projects.filter { it.title.isNotBlank() && normalizedQuery.contains(normalizeResumeQuery(it.title)) }
+        // 1. Specific project title/alias check
+        val matchedProjects = resume.projects.filter { matchesProjectQuery(userPrompt, it, normalizedQuery) }
         val chunkIds = matchedProjects.map { ChunkIdGenerator.forProject(it.title) }.toMutableList()
 
         val shouldDeferBroadRule = shouldDeferBroadRuleToVector(userPrompt, resume)
@@ -454,7 +454,7 @@ class ContextRetriever(
         }
         val hasSkillHint = resume.skills.any { containsResumeTerm(query, it) }
         val hasProjectHint = resume.projects.any { project ->
-            normalizedQuery.contains(normalizeResumeQuery(project.title))
+            matchesProjectQuery(query, project, normalizedQuery)
         }
         return hasCompanyHint || hasSkillHint || hasProjectHint
     }
