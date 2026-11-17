@@ -357,6 +357,38 @@ class ContextRetrieverTest {
         )
     }
 
+    @Test
+    fun `company vector retrieval retains all company projects instead of capping at four chunks`() = runTest {
+        val companyProjects = (1..7).map { index ->
+            Project(
+                title = "지마켓 프로젝트 $index",
+                company = "지마켓",
+                skills = listOf("Spring Boot")
+            )
+        }
+        val provider = object : ResumeProviderPort {
+            override fun getResume() = resume.copy(projects = companyProjects)
+            override fun isInitialized() = true
+        }
+        val expId = ChunkIdGenerator.forExperience("지마켓")
+        persistencePort.stub(expId, "지마켓 경력")
+        companyProjects.forEach { project ->
+            persistencePort.stub(ChunkIdGenerator.forProject(project.title), "${project.title} 백엔드 작업")
+        }
+
+        val retriever = ContextRetriever(persistencePort, provider, ownDomainProfileProvider, true)
+        val result = retriever.retrieveSourcesByVector(
+            "지마켓에서 어떤 백엔드 작업을 했어?",
+            RouteDecision(queryType = QueryType.RESUME_RAG, company = "지마켓")
+        )
+
+        assertEquals(8, result.size)
+        assertTrue(result.any { it.chunkId == expId })
+        companyProjects.forEach { project ->
+            assertTrue(result.any { it.chunkId == ChunkIdGenerator.forProject(project.title) })
+        }
+    }
+
     private class FakeResumePersistencePort : ResumePersistencePort {
         private val contents = mutableMapOf<String, String>()
         var vectorResults: List<ResumeSearchResult> = emptyList()

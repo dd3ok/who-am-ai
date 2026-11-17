@@ -5,7 +5,7 @@
   {"id":"visitor-possessive-with-owner-mention","question":"제 프로젝트를 유인재님에게 소개하고 싶어요","mode":"chat","sources":[]},
   {"id":"visitor-comparison-with-owner-mention","question":"저는 유인재님처럼 Spring Boot 개발자예요","mode":"chat","sources":[]},
   {"id":"project-request-with-trailing-typo","question":"유인재님 프로젝트 알려줘 작업했떤거","sources":["project_who_am_ai","project_WATCHLIST_md","project_savepoint","project_lucid","project_cloudflare_mobile_sync_starter","project_commerce_saga","project_auth_service","project_spring_engineering_skills","project_boring_backend","project_stash","project_briefprint","project_repoclip","project_no_pair_prgm","project_naverstock_api_skill","project_tossinvest_api_skill","project_binance_api_skill","project_isitnowbot","project_market_data_skills","project_yahoo_finance_market_skill","project_naverfinance_api_skill","project_upbit_read_api_skill","project_ESM_셀러딜_신청_프로세스_개선","project_ESM_카테고리_담당자","project_ESM_셀러딜_신청_프로세스_옥션_올킬_신청","project_ESM_셀러딜_신청_프로세스_지마켓_슈퍼딜_신청","project_ESM_로그인_개편","project_판매자_가입_개선","project_ESM_부정_로그인_탐지_ATO_도입","project_삼성전자로지텍_설치지원시스템_BISS_개편","project_삼성전자_입찰견적관리시스템_BQMS_MRO_몰_2_0"]},
-  {"id":"fragment-company","question":"지마켓 경력 중심으로","sources":["experience_지마켓","project_ESM_카테고리_담당자","project_ESM_로그인_개편","project_ESM_셀러딜_신청_프로세스_지마켓_슈퍼딜_신청"]},
+  {"id":"fragment-company","question":"지마켓 경력 중심으로","sources":["experience_지마켓","project_ESM_셀러딜_신청_프로세스_개선","project_ESM_카테고리_담당자","project_ESM_셀러딜_신청_프로세스_옥션_올킬_신청","project_ESM_셀러딜_신청_프로세스_지마켓_슈퍼딜_신청","project_ESM_로그인_개편","project_판매자_가입_개선","project_ESM_부정_로그인_탐지_ATO_도입"]},
   {"id":"fragment-profile","question":"학력과 자격증 목록","sources":["education","certificates"]},
   {"id":"demonstrative-project","question":"그게 어떤 프로젝트야?","history":["ESM 로그인 개편 설명해줘"],"sources":["project_ESM_로그인_개편"]},
   {"id":"quoted-earlier-answer","question":"메시지 큐 기반 대용량 트래픽 처리 시스템을 구축했습니다.","history":["ESM 로그인 개편 설명해줘","그게 어떤 프로젝트야?"],"historyAnswers":["메시지 큐 기반 대용량 트래픽 처리 시스템을 구축했습니다.","확인된 프로젝트를 안내합니다."],"sources":["project_ESM_로그인_개편"],"contextContains":["본인 기여:"]},
@@ -76,5 +76,6 @@
   {"id":"samsung-bqms-biss-shorthand","question":"삼성전자 BQMS와 BISS 개발·운영 경험을 알려주세요","sources":["project_삼성전자로지텍_설치지원시스템_BISS_개편","project_삼성전자_입찰견적관리시스템_BQMS_MRO_몰_2_0"],"contextContains":["설치기사 현장 발주","MRO 자재 구매몰"]},
   {"id":"biss-subject-shorthand","question":"BISS는 어떤 프로젝트야?","sources":["project_삼성전자로지텍_설치지원시스템_BISS_개편"],"contextContains":["삼성전자로지텍 설치지원시스템(BISS) 개편"]},
   {"id":"bqms-follow-up","question":"그럼 사용한 기술은?","history":["BQMS 설명해줘"],"sources":["project_삼성전자_입찰견적관리시스템_BQMS_MRO_몰_2_0"],"contextContains":["Oracle"]},
-  {"id":"ato-shorthand","question":"ATO 도입에서 뭘 했어?","sources":["project_ESM_부정_로그인_탐지_ATO_도입"],"contextContains":["인터리젠 ATO"]}
+  {"id":"ato-shorthand","question":"ATO 도입에서 뭘 했어?","sources":["project_ESM_부정_로그인_탐지_ATO_도입"],"contextContains":["인터리젠 ATO"]},
+  {"id":"gmarket-backend-work","question":"지마켓에서 어떤 백엔드 작업을 했어?","sources":["experience_지마켓","project_ESM_셀러딜_신청_프로세스_개선","project_ESM_카테고리_담당자","project_ESM_셀러딜_신청_프로세스_옥션_올킬_신청","project_ESM_셀러딜_신청_프로세스_지마켓_슈퍼딜_신청","project_ESM_로그인_개편","project_판매자_가입_개선","project_ESM_부정_로그인_탐지_ATO_도입"],"contextContains":["ESM 로그인 개편","판매자 가입 개선","부정 로그인 탐지(ATO)","지마켓 슈퍼딜","옥션 올킬","카테고리 담당자","셀러딜 신청 프로세스 개선"]}
 ]

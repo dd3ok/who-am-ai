@@ -186,7 +186,12 @@ class ContextRetriever(
             similarityThreshold = similarityThresholdOverride.takeIf { it in 0.0..1.0 } ?: retrievalProfile.similarityThreshold
         )
         val blended = (precise + retrieved).distinctBy { it.chunkId }
-        return rerankByHeuristic(finalQuery, blended, routeDecision, 4)
+        val rerankLimit = if (routeDecision.company != null && routeDecision.project == null) {
+            maxOf(8, precise.size).coerceAtMost(12)
+        } else {
+            4
+        }
+        return rerankByHeuristic(finalQuery, blended, routeDecision, rerankLimit)
             .map(::withSourceDetails)
     }
 
