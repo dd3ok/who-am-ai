@@ -67,6 +67,18 @@ class ChatAccessStoreAdapter(private val mongoTemplate: ReactiveMongoTemplate) :
                 ChatRequestBucket::class.java).awaitSingle().count
         }
     }
+
+    override suspend fun findBlockExpiry(key: String): Instant? {
+        ensureIndexes()
+        return mongoTemplate.findById(key, ChatRequestBucket::class.java).awaitSingleOrNull()?.expiresAt
+    }
+
+    override suspend fun setBlockExpiry(key: String, expiresAt: Instant) {
+        ensureIndexes()
+        val query = Query(Criteria.where("_id").`is`(key))
+        val update = Update().set("count", 1L).set("expiresAt", expiresAt)
+        mongoTemplate.upsert(query, update, ChatRequestBucket::class.java).awaitSingle()
+    }
 }
 
 @Document("chat_sessions")

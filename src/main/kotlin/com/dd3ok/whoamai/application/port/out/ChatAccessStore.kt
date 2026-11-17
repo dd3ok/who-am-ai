@@ -7,4 +7,6 @@ interface ChatAccessStore {
     suspend fun createSession(tokenHash: String, session: ChatSession)
     suspend fun findSession(tokenHash: String): ChatSession?
     suspend fun incrementRequestCount(key: String, expiresAt: Instant): Long
+    suspend fun findBlockExpiry(key: String): Instant? = null
+    suspend fun setBlockExpiry(key: String, expiresAt: Instant) {}
 }

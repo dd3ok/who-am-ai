@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 class ChatSessionController(
     private val accessService: ChatAccessService,
-    private val properties: WebSocketProperties
+    private val properties: WebSocketProperties,
+    private val clientIpResolver: ClientIpResolver = ClientIpResolver()
 ) {
     @PostMapping("/api/chat/sessions")
     suspend fun create(request: ServerHttpRequest): ResponseEntity<Any> {
@@ -22,10 +23,12 @@ class ChatSessionController(
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
         }
         return try {
-            val session = accessService.issueSession(request.remoteAddress?.address?.hostAddress ?: "unknown")
+            val clientIp = clientIpResolver.resolve(request.headers, request.remoteAddress)
+            val session = accessService.issueSession(clientIp)
             ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(session)
         } catch (e: ChatAccessException) {
-            ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", "60")
+            ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", e.retryAfterSeconds.toString())
                 .cacheControl(CacheControl.noStore()).body(mapOf("code" to e.code))
         }
     }
