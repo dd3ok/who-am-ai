@@ -2,6 +2,9 @@ package com.dd3ok.whoamai.application.service.career
 
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogSelectorPort
+import com.dd3ok.whoamai.application.port.out.PortfolioSelection
+import com.dd3ok.whoamai.application.port.out.PortfolioSelectionIntent
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.service.ContextRetriever
@@ -192,9 +195,81 @@ class CareerContextPlannerTest {
         assertTrue(plan.prompt.sources.none { it.chunkId == "service_profile" })
     }
 
+    @Test
+    fun `tier 1 rule match bypasses catalog selector without extra LLM call`() = runTest {
+        var selectorCalled = false
+        val planner = plannerWithChunks(
+            chunks = mapOf(ChunkIdGenerator.forRecentActivities() to "퇴사 이후 학습 내용"),
+            selectorPort = PortfolioCatalogSelectorPort { _, _, _ ->
+                selectorCalled = true
+                error("should not invoke selector when Tier 1 matches")
+            }
+        )
+
+        val plan = planner.plan("퇴사 이후 최근에 뭐 공부하고 있어?", emptyList())
+
+        assertEquals("rule", plan.retrieval.retrievalPath)
+        assertTrue(!selectorCalled)
+        assertTrue(plan.prompt.useRagPrompt)
+    }
+
+    @Test
+    fun `tier 2 selector resolves portfolio chunks missing evidence and general chat while filtering assistant turns`() = runTest {
+        val projectChunkId = ChunkIdGenerator.forProject("ESM 로그인 개편")
+        var observedRoles: List<String> = emptyList()
+        val planner = plannerWithChunks(
+            chunks = mapOf(projectChunkId to "GeoIP 기반 접속 차단 구현 상세"),
+            selectorPort = PortfolioCatalogSelectorPort { question, history, _ ->
+                observedRoles = history.map { it.role }
+                when {
+                    question.contains("GeoIP") -> PortfolioSelection(PortfolioSelectionIntent.PORTFOLIO_ANSWER, listOf(projectChunkId))
+                    question.contains("결혼") -> PortfolioSelection(PortfolioSelectionIntent.MISSING_EVIDENCE)
+                    else -> PortfolioSelection(PortfolioSelectionIntent.GENERAL_CHAT)
+                }
+            }
+        )
+        val mixedHistory = listOf(
+            ChatMessage("user", "이전에 만든 서비스가 뭐야?"),
+            ChatMessage("model", "assistant 가짜 사실"),
+            ChatMessage("user", "ESM 이야기 이어서 할게")
+        )
+
+        val answerPlan = planner.plan("GeoIP 연동은 어떻게 처리했어?", mixedHistory)
+        assertEquals("selector", answerPlan.retrieval.retrievalPath)
+        assertTrue(answerPlan.prompt.useRagPrompt)
+        assertEquals(listOf(projectChunkId), answerPlan.prompt.sources.map { it.chunkId })
+        assertEquals(listOf("user", "user"), observedRoles)
+
+        val missingPlan = planner.plan("혹시 결혼은 하셨나요?", mixedHistory)
+        assertEquals("rag_empty", missingPlan.retrieval.retrievalPath)
+        assertTrue(missingPlan.prompt.useRagPrompt)
+        assertTrue(missingPlan.retrieval.resumeQuestionDetected)
+        assertTrue(missingPlan.prompt.sources.isEmpty())
+
+        val chatPlan = planner.plan("점심 뭐 먹을까?", mixedHistory)
+        assertEquals("selector_chat", chatPlan.retrieval.retrievalPath)
+        assertTrue(!chatPlan.prompt.useRagPrompt)
+        assertTrue(!chatPlan.retrieval.resumeQuestionDetected)
+        assertTrue(chatPlan.prompt.sources.isEmpty())
+    }
+
+    @Test
+    fun `tier 2 selector exception falls back cleanly to router path`() = runTest {
+        val planner = plannerWithChunks(
+            chunks = emptyMap(),
+            selectorPort = PortfolioCatalogSelectorPort { _, _, _ -> throw IllegalStateException("selector unavailable") }
+        )
+
+        val plan = planner.plan("오늘 날씨 어때?", emptyList())
+
+        assertEquals("non_rag", plan.retrieval.retrievalPath)
+        assertTrue(!plan.prompt.useRagPrompt)
+    }
+
     private fun plannerWithChunks(
         chunks: Map<String, String>,
-        topicPort: ConversationTopicPort = ConversationTopicPort { _, _, _ -> null }
+        topicPort: ConversationTopicPort = ConversationTopicPort { _, _, _ -> null },
+        selectorPort: PortfolioCatalogSelectorPort = PortfolioCatalogSelectorPort { _, _, _ -> null }
     ): CareerContextPlanner {
         val resumeProviderPort = SampleResumeProviderPort()
         return CareerContextPlanner(
@@ -209,7 +284,8 @@ class CareerContextPlannerTest {
                 metadataFilterEnabled = true
             ),
             meterRegistry = SimpleMeterRegistry(),
-            conversationTopicPort = topicPort
+            conversationTopicPort = topicPort,
+            portfolioCatalogSelectorPort = selectorPort
         )
     }
 

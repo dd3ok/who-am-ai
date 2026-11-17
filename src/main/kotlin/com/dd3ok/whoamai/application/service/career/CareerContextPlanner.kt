@@ -3,11 +3,14 @@ package com.dd3ok.whoamai.application.service.career
 import com.dd3ok.whoamai.application.service.ContextRetriever
 import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.port.out.ConversationTopic
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogSelectorPort
+import com.dd3ok.whoamai.application.port.out.PortfolioSelectionIntent
 import com.dd3ok.whoamai.application.service.LLMRouter
 import com.dd3ok.whoamai.application.service.dto.QueryType
 import com.dd3ok.whoamai.domain.ChatMessage
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import kotlin.coroutines.cancellation.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
@@ -16,7 +19,8 @@ class CareerContextPlanner(
     private val llmRouter: LLMRouter,
     private val contextRetriever: ContextRetriever,
     private val meterRegistry: MeterRegistry,
-    private val conversationTopicPort: ConversationTopicPort
+    private val conversationTopicPort: ConversationTopicPort,
+    private val portfolioCatalogSelectorPort: PortfolioCatalogSelectorPort = PortfolioCatalogSelectorPort { _, _, _ -> null }
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -31,16 +35,38 @@ class CareerContextPlanner(
         var retrievalPath = if (sources.isNotEmpty()) "rule" else "unknown"
 
         if (sources.isEmpty() && resolved.topic == null) {
-            val routeDecision = llmRouter.route(retrievalPrompt)
-            logger.info("No rule match. LLM Router hint: {}", routeDecision)
-            if (routeDecision.queryType == QueryType.RESUME_RAG) {
-                resumeQuestionDetected = true
-                sources = recordSuspendTimer("whoamai.chat.rag.vector.duration") {
-                    contextRetriever.retrieveSourcesByVector(retrievalPrompt, routeDecision)
+            val userHistory = history.filter { it.role == "user" }.takeLast(6)
+            val selection = selectFromCatalogSafely(userPrompt, userHistory)
+            if (selection != null) {
+                when (selection.intent) {
+                    PortfolioSelectionIntent.PORTFOLIO_ANSWER -> {
+                        resumeQuestionDetected = true
+                        sources = contextRetriever.retrieveSourcesByIds(selection.chunkIds)
+                        retrievalPath = if (sources.isNotEmpty()) "selector" else "rag_empty"
+                    }
+                    PortfolioSelectionIntent.MISSING_EVIDENCE -> {
+                        resumeQuestionDetected = true
+                        sources = emptyList()
+                        retrievalPath = "rag_empty"
+                    }
+                    PortfolioSelectionIntent.GENERAL_CHAT -> {
+                        resumeQuestionDetected = false
+                        sources = emptyList()
+                        retrievalPath = "selector_chat"
+                    }
                 }
-                retrievalPath = "vector"
             } else {
-                retrievalPath = "non_rag"
+                val routeDecision = llmRouter.route(retrievalPrompt)
+                logger.info("No rule match. LLM Router hint: {}", routeDecision)
+                if (routeDecision.queryType == QueryType.RESUME_RAG) {
+                    resumeQuestionDetected = true
+                    sources = recordSuspendTimer("whoamai.chat.rag.vector.duration") {
+                        contextRetriever.retrieveSourcesByVector(retrievalPrompt, routeDecision)
+                    }
+                    retrievalPath = "vector"
+                } else {
+                    retrievalPath = "non_rag"
+                }
             }
         }
 
@@ -79,6 +105,22 @@ class CareerContextPlanner(
     }
 
     private data class ResolvedQuery(val query: String, val topic: ConversationTopic? = null)
+
+    private suspend fun selectFromCatalogSafely(
+        userPrompt: String,
+        userHistory: List<ChatMessage>
+    ) = try {
+        val catalog = contextRetriever.portfolioCatalog()
+        if (catalog.isEmpty()) null
+        else recordSuspendTimer("whoamai.chat.selector.duration") {
+            portfolioCatalogSelectorPort.selectContext(userPrompt, userHistory, catalog)
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        logger.warn("Catalog selector failed. Falling back to LLM router + vector path.", e)
+        null
+    }
 
     private suspend fun <T> recordSuspendTimer(name: String, block: suspend () -> T): T {
         val sample = Timer.start(meterRegistry)

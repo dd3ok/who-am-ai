@@ -16,6 +16,7 @@ data class GeminiChatModelProperties(
     var models: List<String?>? = emptyList(),
     var model: String? = "",
     var reasoningEffort: String = "medium",
+    var selectorReasoningEffort: String = "low",
     var maxOutputTokens: Int = 8192,
     var rateLimitCooldownMs: Long = 60_000L
 )

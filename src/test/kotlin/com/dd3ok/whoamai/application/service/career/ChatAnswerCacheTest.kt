@@ -214,7 +214,7 @@ class ChatAnswerCacheTest {
         val ownDomainProfileProvider = OwnDomainProfileProvider()
         val persistencePort = SamplePersistencePort()
         val contextRetriever = ContextRetriever(persistencePort, resumeProviderPort, ownDomainProfileProvider, true)
-        val planner = CareerContextPlanner(llmRouter, contextRetriever, meterRegistry) { _, _, _ -> null }
+        val planner = CareerContextPlanner(llmRouter, contextRetriever, meterRegistry, { _, _, _ -> null })
         val assembler = CareerPromptAssembler(FakePromptProvider)
         val coordinator = ChatAnswerCacheCoordinator(
             cacheStore = cacheStore,

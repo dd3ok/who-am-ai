@@ -14,6 +14,9 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.ai.vectorstore.filter.Filter
+import org.springframework.core.io.ClassPathResource
+import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -387,6 +390,87 @@ class ContextRetrieverTest {
         companyProjects.forEach { project ->
             assertTrue(result.any { it.chunkId == ChunkIdGenerator.forProject(project.title) })
         }
+    }
+
+    @Test
+    fun `portfolioCatalog exposes sections service profile and salient project body keywords`() {
+        val richResume = resume.copy(
+            projects = listOf(
+                Project(
+                    title = "ESM 로그인 개편",
+                    company = "지마켓",
+                    skills = listOf("Spring Boot", "Redis"),
+                    tags = listOf("보안", "로그인"),
+                    description = "글로벌 접근 제어와 세션 통합",
+                    problem = "해외 부정 로그인 탐지 필요",
+                    contribution = "GeoIP 기반 접속 지역 차단 및 부분 취소 정산 연계"
+                ),
+                Project(
+                    title = "실시간 이벤트 파이프라인",
+                    company = "지마켓",
+                    skills = listOf("Kafka"),
+                    contribution = "Debezium CDC 기반 변경 데이터 캡처 파이프라인 구축"
+                )
+            )
+        )
+        val retriever = ContextRetriever(
+            persistencePort,
+            object : ResumeProviderPort {
+                override fun getResume(): Resume = richResume
+                override fun isInitialized(): Boolean = true
+            },
+            ownDomainProfileProvider,
+            metadataFilterEnabled = true
+        )
+
+        val catalog = retriever.portfolioCatalog()
+        val loginEntry = catalog.first { it.chunkId == ChunkIdGenerator.forProject("ESM 로그인 개편") }
+        val cdcEntry = catalog.first { it.chunkId == ChunkIdGenerator.forProject("실시간 이벤트 파이프라인") }
+
+        assertTrue(catalog.any { it.chunkId == "service_profile" })
+        assertTrue(catalog.any { it.chunkId == ChunkIdGenerator.forRecentActivities() })
+        assertTrue(loginEntry.keywords.any { it.equals("GeoIP", ignoreCase = true) })
+        assertTrue(loginEntry.summary.contains("부분 취소"))
+        assertTrue(cdcEntry.keywords.any { it.equals("Debezium", ignoreCase = true) })
+    }
+
+    @Test
+    fun `retrieveSourcesByIds preserves order and resolves service_profile alongside project chunks`() = runTest {
+        val projectId = ChunkIdGenerator.forProject("정산 플랫폼")
+        persistencePort.stub(projectId, "정산 플랫폼 내용")
+
+        val results = contextRetriever.retrieveSourcesByIds(listOf("service_profile", projectId, "service_profile"))
+
+        assertEquals(listOf("service_profile", projectId), results.map { it.chunkId })
+        assertEquals("정산 플랫폼", results[1].title)
+    }
+
+    @Test
+    fun `real resume catalog retains tail keywords in recent_activities and project bodies`() {
+        val realResume: Resume = ClassPathResource("resume.json").inputStream.use {
+            jacksonObjectMapper().readValue(it)
+        }
+        val retriever = ContextRetriever(
+            persistencePort,
+            object : ResumeProviderPort {
+                override fun getResume(): Resume = realResume
+                override fun isInitialized(): Boolean = true
+            },
+            ownDomainProfileProvider,
+            metadataFilterEnabled = true
+        )
+
+        val catalog = retriever.portfolioCatalog()
+        val recentEntry = catalog.first { it.chunkId == ChunkIdGenerator.forRecentActivities() }
+        val sagaEntry = catalog.first { it.chunkId == ChunkIdGenerator.forProject("commerce-saga") }
+
+        for (expectedKeyword in listOf("isitnowbot", "market-data-skills", "yfinance", "repoclip", "WATCHLIST.md", "boring-backend")) {
+            assertTrue(
+                recentEntry.keywords.any { it.equals(expectedKeyword, ignoreCase = true) },
+                "Expected recent_activities catalog entry to retain keyword '$expectedKeyword', got: ${recentEntry.keywords}"
+            )
+        }
+        assertTrue(sagaEntry.keywords.any { it.equals("Debezium", ignoreCase = true) })
     }
 
     private class FakeResumePersistencePort : ResumePersistencePort {

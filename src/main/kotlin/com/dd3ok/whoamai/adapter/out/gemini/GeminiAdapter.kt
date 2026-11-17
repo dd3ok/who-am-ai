@@ -3,6 +3,10 @@ package com.dd3ok.whoamai.adapter.out.gemini
 import com.dd3ok.whoamai.application.port.out.GeminiPort
 import com.dd3ok.whoamai.application.port.out.ConversationTopicPort
 import com.dd3ok.whoamai.application.port.out.ConversationTopic
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogEntry
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogSelectorPort
+import com.dd3ok.whoamai.application.port.out.PortfolioSelection
+import com.dd3ok.whoamai.application.port.out.PortfolioSelectionIntent
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
@@ -24,6 +28,7 @@ import org.springframework.ai.openai.OpenAiChatModel.ResponseFormat
 import org.springframework.core.io.ClassPathResource
 import org.springframework.stereotype.Component
 import tools.jackson.databind.DeserializationFeature
+import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import tools.jackson.module.kotlin.KotlinModule
 import java.util.concurrent.ConcurrentHashMap
@@ -35,7 +40,7 @@ class GeminiAdapter(
     private val chatModelProperties: GeminiChatModelProperties,
     private val promptTemplateService: PromptProvider,
     private val meterRegistry: MeterRegistry
-) : GeminiPort, ConversationTopicPort {
+) : GeminiPort, ConversationTopicPort, PortfolioCatalogSelectorPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
     private val rateLimitedUntilByModel = ConcurrentHashMap<String, Long>()
@@ -44,24 +49,24 @@ class GeminiAdapter(
     private val followUpInstruction by lazy {
         ClassPathResource("prompts/follow-up.st").inputStream.bufferedReader().use { it.readText() }
     }
+    private val catalogSelectorInstruction by lazy {
+        ClassPathResource("prompts/catalog-selector.st").inputStream.bufferedReader().use { it.readText() }
+    }
 
     override suspend fun selectTopic(question: String, history: List<ChatMessage>, topics: List<ConversationTopic>): ConversationTopic? {
         if (topics.isEmpty()) return null
-        val format = ResponseFormat.builder().type(ResponseFormat.Type.JSON_SCHEMA).jsonSchema(
-            mapper.writeValueAsString(mapOf(
-                "type" to "object",
-                "properties" to mapOf("topicIndex" to mapOf("type" to "integer", "enum" to (0..topics.size).toList())),
-                "required" to listOf("topicIndex"), "additionalProperties" to false
-            ))
-        ).build()
-        val input = mapOf("question" to question, "history" to history,
-            "topics" to topics.mapIndexed { index, topic -> mapOf("index" to index + 1, "title" to topic.title) })
-        val result = StringBuilder()
-        streamWithPriorities(listOf(SystemMessage(followUpInstruction), UserMessage(mapper.writeValueAsString(input))), format)
-            .collect { result.append(it) }
-        val json = mapper.readTree(result.toString())
-        val index = json?.get("topicIndex")
-        check(json?.isObject == true && json.size() == 1 && index?.isIntegralNumber == true && index.canConvertToInt()) {
+        val format = buildJsonSchemaFormat(
+            properties = mapOf("topicIndex" to mapOf("type" to "integer", "enum" to (0..topics.size).toList())),
+            required = listOf("topicIndex")
+        )
+        val input = mapOf(
+            "question" to question,
+            "history" to history,
+            "topics" to topics.mapIndexed { index, topic -> mapOf("index" to index + 1, "title" to topic.title) }
+        )
+        val json = collectStructuredJson(followUpInstruction, input, format)
+        val index = json.get("topicIndex")
+        check(json.isObject && json.size() == 1 && index?.isIntegralNumber == true && index.canConvertToInt()) {
             "Invalid conversation topic response."
         }
         val selected = index.intValue()
@@ -69,15 +74,94 @@ class GeminiAdapter(
         return if (selected == 0) null else topics[selected - 1]
     }
 
+    override suspend fun selectContext(
+        question: String,
+        history: List<ChatMessage>,
+        catalog: List<PortfolioCatalogEntry>
+    ): PortfolioSelection {
+        if (catalog.isEmpty()) return PortfolioSelection(PortfolioSelectionIntent.MISSING_EVIDENCE)
+        val validIds = catalog.map { it.chunkId }
+        val validIdSet = validIds.toSet()
+        val format = buildJsonSchemaFormat(
+            properties = mapOf(
+                "intent" to mapOf("type" to "string", "enum" to PortfolioSelectionIntent.entries.map { it.name }),
+                "chunkIds" to mapOf("type" to "array", "items" to mapOf("type" to "string", "enum" to validIds))
+            ),
+            required = listOf("intent", "chunkIds")
+        )
+        val input = mapOf(
+            "question" to question,
+            "history" to history.map { mapOf("role" to it.role, "text" to it.text) },
+            "catalog" to catalog
+        )
+        val json = collectStructuredJson(catalogSelectorInstruction, input, format)
+        check(json.isObject && json.size() == 2) { "Invalid catalog selection response." }
+        val intentNode = json.get("intent")
+        val chunkIdsNode = json.get("chunkIds")
+        check(intentNode?.isString == true && chunkIdsNode?.isArray == true) {
+            "Invalid catalog selection field types."
+        }
+        val intent = runCatching { PortfolioSelectionIntent.valueOf(intentNode.asString()) }
+            .getOrElse { throw IllegalStateException("Invalid catalog selection intent: ${intentNode.asString()}") }
+        val chunkIds = mutableListOf<String>()
+        for (node in chunkIdsNode) {
+            check(node.isString) { "Catalog selection chunkId must be a string." }
+            val chunkId = node.asString()
+            check(chunkId in validIdSet) { "Catalog selection chunkId is outside the supplied catalog: $chunkId" }
+            chunkIds += chunkId
+        }
+        val distinctIds = chunkIds.distinct()
+        if (intent == PortfolioSelectionIntent.PORTFOLIO_ANSWER) {
+            check(distinctIds.isNotEmpty()) { "PORTFOLIO_ANSWER requires at least one catalog chunkId." }
+        } else {
+            check(distinctIds.isEmpty()) { "$intent must return an empty chunkIds array." }
+        }
+        return PortfolioSelection(intent = intent, chunkIds = distinctIds)
+    }
+
     override suspend fun generateChatContent(history: List<ChatMessage>): Flow<String> {
         val messages = buildPromptMessages(history, promptTemplateService.systemInstruction())
         return streamWithPriorities(messages)
     }
 
-    private fun buildChatOptions(model: String, format: ResponseFormat?): OpenAiChatOptions {
+    private fun buildJsonSchemaFormat(properties: Map<String, Any>, required: List<String>): ResponseFormat =
+        ResponseFormat.builder()
+            .type(ResponseFormat.Type.JSON_SCHEMA)
+            .jsonSchema(
+                mapper.writeValueAsString(
+                    mapOf(
+                        "type" to "object",
+                        "properties" to properties,
+                        "required" to required,
+                        "additionalProperties" to false
+                    )
+                )
+            )
+            .build()
+
+    private suspend fun collectStructuredJson(
+        instruction: String,
+        payload: Any,
+        format: ResponseFormat,
+        reasoningEffort: String = chatModelProperties.selectorReasoningEffort
+    ): JsonNode {
+        val result = StringBuilder()
+        streamWithPriorities(
+            messages = listOf(SystemMessage(instruction), UserMessage(mapper.writeValueAsString(payload))),
+            format = format,
+            reasoningEffort = reasoningEffort
+        ).collect { result.append(it) }
+        return mapper.readTree(result.toString())
+    }
+
+    private fun buildChatOptions(
+        model: String,
+        format: ResponseFormat?,
+        reasoningEffort: String = chatModelProperties.reasoningEffort
+    ): OpenAiChatOptions {
         return OpenAiChatOptions.builder()
             .model(model)
-            .reasoningEffort(chatModelProperties.reasoningEffort)
+            .reasoningEffort(reasoningEffort)
             .maxTokens(chatModelProperties.maxOutputTokens)
             .also { if (format != null) it.responseFormat(format) }
             .build()
@@ -90,14 +174,18 @@ class GeminiAdapter(
         return messages
     }
 
-    private fun streamWithPriorities(messages: List<Message>, format: ResponseFormat? = null): Flow<String> = channelFlow {
+    private fun streamWithPriorities(
+        messages: List<Message>,
+        format: ResponseFormat? = null,
+        reasoningEffort: String = chatModelProperties.reasoningEffort
+    ): Flow<String> = channelFlow {
         var lastError: Throwable? = null
         val models = availableModels().takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("No models configured in Gemini properties.")
 
         for ((idx, model) in models.withIndex()) {
             recordModelAttempt(model)
-            val options = buildChatOptions(model, format)
+            val options = buildChatOptions(model, format, reasoningEffort)
             val prompt = Prompt(messages, options)
             var emittedAnyChunk = false
 

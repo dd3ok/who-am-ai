@@ -18,6 +18,7 @@ class GeminiChatModelPropertiesTest {
                 "who-am-ai.ai.chat.models[0]=gemini-3.1-flash-lite",
                 "who-am-ai.ai.chat.models[1]=gemini-2.5-flash-lite",
                 "who-am-ai.ai.chat.reasoning-effort=high",
+                "who-am-ai.ai.chat.selector-reasoning-effort=minimal",
                 "who-am-ai.ai.chat.max-output-tokens=4096",
                 "who-am-ai.ai.chat.rate-limit-cooldown-ms=45000"
             )
@@ -26,6 +27,7 @@ class GeminiChatModelPropertiesTest {
 
                 assertEquals(listOf("gemini-3.1-flash-lite", "gemini-2.5-flash-lite"), properties.models)
                 assertEquals("high", properties.reasoningEffort)
+                assertEquals("minimal", properties.selectorReasoningEffort)
                 assertEquals(4096, properties.maxOutputTokens)
                 assertEquals(45_000L, properties.rateLimitCooldownMs)
             }
