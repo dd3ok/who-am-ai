@@ -147,11 +147,16 @@ class ChatAnswerCacheCoordinator(
         private val STANDALONE_PROFILE_PATTERNS = listOf(
             "보유한주요기술스택",
             "총경력기간",
+            "회사별이력",
             "학력",
             "자격증",
+            "퇴사이후",
+            "최근활동",
             "공개된개인github프로젝트",
             "공개github프로젝트",
-            "최근진행한프로젝트"
+            "공개한github프로젝트",
+            "최근진행한프로젝트",
+            "간단히소개"
         )
     }
 }

@@ -174,6 +174,24 @@ class CareerContextPlannerTest {
         assertEquals(listOf("education"), plan.prompt.sources.map { it.chunkId })
     }
 
+    @Test
+    fun `standalone recent activity question does not inherit an earlier own-service topic`() = runTest {
+        val planner = plannerWithChunks(
+            mapOf(
+                ChunkIdGenerator.forRecentActivities() to "퇴사 이후 파이프라인 및 시스템 디자인 학습",
+                ChunkIdGenerator.forProject("ESM 로그인 개편") to "ESM 로그인 개편 자료"
+            ),
+            ConversationTopicPort { _, _, topics -> topics.first() }
+        )
+        val history = listOf(
+            ChatMessage("user", "who-am-ai는 어떤 구조로 만들었어?"),
+            ChatMessage("model", "who-am-ai 구현 안내")
+        )
+        val plan = planner.plan("퇴사 이후 최근에는 어떤 프로젝트와 공부를 하고 있나요?", history)
+        assertTrue(plan.prompt.sources.any { it.chunkId == ChunkIdGenerator.forRecentActivities() })
+        assertTrue(plan.prompt.sources.none { it.chunkId == "service_profile" })
+    }
+
     private fun plannerWithChunks(
         chunks: Map<String, String>,
         topicPort: ConversationTopicPort = ConversationTopicPort { _, _, _ -> null }

@@ -81,12 +81,14 @@ private fun isLikelyResumeQuestion(
     val hasTargetedIntroSignal = hasNamedTarget &&
         TARGETED_INTRO_PATTERNS.any { normalizedPrompt.contains(it) }
 
+    val hasRecentActivityTarget = ResumeIntentKeywords.recentActivity.any { normalizedPrompt.contains(it) }
+    val isAdviceQuestion = listOf("작성", "추천", "방법", "어떻게공부", "공부법", "공부방법").any { normalizedPrompt.contains(it) } ||
+        (normalizedPrompt.contains("공부") && !hasRecentActivityTarget)
+
     if (hasExternalSubject && !hasOwnWorkTarget) {
         return false
     }
-    if (!hasDirectTarget && !hasOwnWorkTarget &&
-        listOf("공부", "작성", "추천", "방법").any { normalizedPrompt.contains(it) }
-    ) return false
+    if (!hasDirectTarget && !hasOwnWorkTarget && isAdviceQuestion) return false
 
     return hasResumeEntity ||
         (hasSelfContainedProfileSignal && !hasExternalSubject) ||

@@ -68,7 +68,14 @@ class ContextRetriever(
                     resume.projects.filter { it.company == exp.company }.map { ChunkIdGenerator.forProject(it.title) })
             }
         }
-        if (isOwnServiceQuestion(normalizeResumeQuery(userPrompt)) || workTopics(userPrompt).isNotEmpty()) return emptyList()
+        val normalizedPrompt = normalizeResumeQuery(userPrompt)
+        if (isOwnServiceQuestion(normalizedPrompt) || workTopics(userPrompt).isNotEmpty()) return emptyList()
+        if (!isFollowUpQuestion(userPrompt) &&
+            isLikelyOwnDomainQuestion(userPrompt, normalizedPrompt, resume, names) &&
+            rules.any { it(RuleContext(normalizedPrompt, names)) != null }
+        ) {
+            return emptyList()
+        }
         return history.filter { it.role == "user" }.flatMap { message ->
             val normalized = normalizeResumeQuery(message.text)
             when {
