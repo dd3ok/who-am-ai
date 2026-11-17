@@ -1,5 +1,6 @@
 package com.dd3ok.whoamai.application.service
 	
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogEntry
 import com.dd3ok.whoamai.application.port.out.ResumePersistencePort
 import com.dd3ok.whoamai.application.port.out.ResumeSearchResult
 import com.dd3ok.whoamai.application.port.out.ResumeProviderPort
@@ -94,9 +95,162 @@ class ContextRetriever(
         }.filter { it.sourceIds.isNotEmpty() }.distinct()
     }
 
-    suspend fun retrieveSourcesForTopic(topic: ConversationTopic): List<ResumeSearchResult> {
-        if (topic.sourceIds == listOf("service_profile")) return listOf(serviceProfileSource())
-        return fetchStructuredChunks(topic.sourceIds).map(::withSourceDetails)
+    suspend fun retrieveSourcesForTopic(topic: ConversationTopic): List<ResumeSearchResult> =
+        retrieveSourcesByIds(topic.sourceIds)
+
+    /**
+     * Catalog selector가 선택한 chunk ID 목록을 순서대로 조회해 출처 메타데이터를 채운다.
+     */
+    suspend fun retrieveSourcesByIds(chunkIds: List<String>): List<ResumeSearchResult> {
+        val distinctIds = chunkIds.distinct()
+        if (distinctIds.isEmpty()) return emptyList()
+        val stored = fetchStructuredChunks(distinctIds.filterNot { it == "service_profile" })
+            .associateBy { it.chunkId }
+        return distinctIds.mapNotNull { chunkId ->
+            if (chunkId == "service_profile") serviceProfileSource()
+            else stored[chunkId]?.let(::withSourceDetails)
+        }
+    }
+
+    /**
+     * Tier 2 unified catalog selector에 전달할 컴팩트 포트폴리오 카탈로그를 생성한다.
+     * 본문 핵심 키워드(예: GeoIP, Debezium, yfinance)를 함께 추출해 세부 기술 질문도 매칭할 수 있게 한다.
+     */
+    fun portfolioCatalog(): List<PortfolioCatalogEntry> {
+        val resume = resumeProviderPort.getResume()
+        val entries = mutableListOf<PortfolioCatalogEntry>()
+
+        if (resume.summary.isNotBlank()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forSummary(),
+                chunkType = "summary",
+                title = "프로필 소개",
+                summary = compactCatalogText(listOf(resume.name, resume.summary)),
+                keywords = salientKeywords(emptyList(), listOf(resume.summary))
+            )
+        }
+        if (resume.recentActivities.isNotBlank()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forRecentActivities(),
+                chunkType = "recent_activities",
+                title = "최근 활동",
+                summary = compactCatalogText(listOf(resume.recentActivities)),
+                keywords = salientKeywords(listOf("최근 활동", "근황", "공부"), listOf(resume.recentActivities))
+            )
+        }
+        if (resume.experiences.isNotEmpty()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forTotalExperience(),
+                chunkType = "experience_total",
+                title = "총 경력",
+                summary = compactCatalogText(resume.experiences.map { "${it.company} (${it.period.start}~${it.period.end.ifBlank { "재직중" }})" }),
+                keywords = listOf("총 경력", "경력 연차", "회사 목록")
+            )
+        }
+        if (resume.skills.isNotEmpty()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forSkills(),
+                chunkType = "skills",
+                title = "기술 스택",
+                summary = compactCatalogText(resume.skills),
+                keywords = resume.skills.take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+        if (resume.education.isNotEmpty()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forEducation(),
+                chunkType = "education",
+                title = "학력",
+                summary = compactCatalogText(resume.education.map { "${it.school} ${it.major} ${it.degree}" }),
+                keywords = resume.education.flatMap { listOf(it.school, it.major) }.filter { it.isNotBlank() }.take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+        if (resume.certificates.isNotEmpty()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forCertificates(),
+                chunkType = "certificates",
+                title = "자격증",
+                summary = compactCatalogText(resume.certificates.map { it.title }),
+                keywords = resume.certificates.map { it.title }.filter { it.isNotBlank() }.take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+        if (resume.interests.isNotEmpty()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forInterests(),
+                chunkType = "interests",
+                title = "관심사",
+                summary = compactCatalogText(resume.interests),
+                keywords = resume.interests.take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+        if (resume.mbti.isNotBlank()) {
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forMbti(),
+                chunkType = "mbti",
+                title = "성격",
+                summary = compactCatalogText(listOf(resume.mbti)),
+                keywords = listOf("MBTI", resume.mbti)
+            )
+        }
+        if (resume.hobbies.isNotEmpty()) {
+            val items = resume.hobbies.flatMap { it.items }
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forHobbies(),
+                chunkType = "hobbies",
+                title = "취미",
+                summary = compactCatalogText(items),
+                keywords = items.take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+        val serviceProfile = ownDomainProfileProvider.serviceProfile()
+        entries += PortfolioCatalogEntry(
+            chunkId = "service_profile",
+            chunkType = "service",
+            title = "who-am-ai 구현 정보",
+            summary = compactCatalogText(listOf(serviceProfile)),
+            keywords = salientKeywords(listOf("who-am-ai", "RAG", "WebSocket", "Prompt"), listOf(serviceProfile))
+        )
+
+        resume.experiences.forEach { exp ->
+            val periodEnd = exp.period.end.ifBlank { "재직중" }
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forExperience(exp.company),
+                chunkType = "experience",
+                title = "${exp.company} 경력",
+                summary = compactCatalogText(listOf(exp.position, "${exp.period.start}~$periodEnd")),
+                keywords = (exp.aliases + exp.tags).map(String::trim).filter(String::isNotBlank).distinct().take(CATALOG_KEYWORD_LIMIT)
+            )
+        }
+
+        resume.projects.forEach { proj ->
+            val bodyParts = listOf(proj.description, proj.problem, proj.contribution, proj.outcome)
+            entries += PortfolioCatalogEntry(
+                chunkId = ChunkIdGenerator.forProject(proj.title),
+                chunkType = "project",
+                title = proj.title,
+                summary = compactCatalogText(listOf(proj.company) + bodyParts),
+                keywords = salientKeywords(proj.aliases + proj.tags + proj.skills, bodyParts)
+            )
+        }
+        return entries
+    }
+
+    private fun compactCatalogText(parts: List<String>, maxLength: Int = CATALOG_SUMMARY_MAX_LENGTH): String {
+        val joined = parts.map(String::trim).filter(String::isNotBlank).joinToString(" / ")
+            .replace(Regex("\\s+"), " ")
+        return if (joined.length <= maxLength) joined else joined.take(maxLength - 3).trimEnd() + "..."
+    }
+
+    private fun salientKeywords(base: List<String>, texts: List<String>, limit: Int = CATALOG_KEYWORD_LIMIT): List<String> {
+        val tokens = TECHNICAL_TOKEN_REGEX.findAll(texts.joinToString(" "))
+            .map { it.value.trimEnd('.', ',', ':', ';', ')') }
+            .filter { it.length >= 2 }
+        return (base.asSequence() + tokens)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinctBy { it.lowercase() }
+            .take(limit)
+            .toList()
     }
 
     private fun serviceProfileSource() = ResumeSearchResult("service_profile", "service", ownDomainProfileProvider.serviceProfile(),
@@ -511,6 +665,9 @@ private val EXPERIENCE_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
     "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션"
 )
 private val BROAD_RULE_RESULTS = setOf("projects", "experiences", "skills")
+private const val CATALOG_SUMMARY_MAX_LENGTH = 160
+private const val CATALOG_KEYWORD_LIMIT = 12
+private val TECHNICAL_TOKEN_REGEX = Regex("[A-Za-z][A-Za-z0-9_.+-]{1,}")
 
 private fun isSpecificResumeSlotQuery(normalizedQuery: String): Boolean {
     val slotKeywords = TOTAL_EXPERIENCE_KEYWORDS +

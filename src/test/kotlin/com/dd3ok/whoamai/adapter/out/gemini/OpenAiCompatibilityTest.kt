@@ -4,6 +4,9 @@ import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.dd3ok.whoamai.application.port.out.ConversationTopic
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogEntry
+import com.dd3ok.whoamai.application.port.out.PortfolioSelection
+import com.dd3ok.whoamai.application.port.out.PortfolioSelectionIntent
 import com.dd3ok.whoamai.eval.AnswerSample
 import com.dd3ok.whoamai.eval.EvalSource
 import com.dd3ok.whoamai.eval.GeminiAnswerJudge
@@ -124,7 +127,7 @@ class OpenAiCompatibilityTest {
                 assertEquals(candidate, topic)
                 val body = mapper.readTree(requests.single().body)
                 assertEquals("gemini-3.8-flash", body["model"].stringValue())
-                assertEquals("medium", body["reasoning_effort"].stringValue())
+                assertEquals("low", body["reasoning_effort"].stringValue())
                 assertEquals("json_schema", body["response_format"]["type"].stringValue())
                 assertEquals(listOf(0, 1), body["response_format"]["json_schema"]["schema"]
                     ["properties"]["topicIndex"]["enum"].values().map { it.intValue() })
@@ -133,6 +136,41 @@ class OpenAiCompatibilityTest {
                 assertEquals("얼마나 빨라졌어?", input["question"].stringValue())
                 assertEquals("ESM 로그인 개편", input["topics"][0]["title"].stringValue())
                 assertFalse(input["topics"][0].has("sourceIds"))
+            }
+        }
+    }
+
+    @Test
+    fun `portfolio catalog selection uses low reasoning effort and strict json schema on the existing provider`() {
+        val stream = chunk(mapper.writeValueAsString(mapOf(
+            "content" to """{"intent":"PORTFOLIO_ANSWER","chunkIds":["project_ESM_로그인_개편"]}"""
+        ))) + chunk("{}", "\"stop\"") + "data: [DONE]\n\n"
+        withServer(200, "text/event-stream", stream) { baseUrl, requests ->
+            contextRunner(baseUrl).run { context ->
+                val model = adapter(
+                    context.getBean(StreamingChatModel::class.java),
+                    context.getBean(GeminiChatModelProperties::class.java)
+                )
+                val catalog = listOf(
+                    PortfolioCatalogEntry("project_ESM_로그인_개편", "project", "ESM 로그인 개편", "GeoIP 로그인 차단", listOf("GeoIP"))
+                )
+                val selection = runBlocking {
+                    model.selectContext("GeoIP는 어떻게 처리했어?", listOf(ChatMessage("user", "ESM 이야기")), catalog)
+                }
+                assertEquals(PortfolioSelection(PortfolioSelectionIntent.PORTFOLIO_ANSWER, listOf("project_ESM_로그인_개편")), selection)
+                val body = mapper.readTree(requests.single().body)
+                assertEquals("low", body["reasoning_effort"].stringValue())
+                assertEquals("json_schema", body["response_format"]["type"].stringValue())
+                val schema = body["response_format"]["json_schema"]["schema"]
+                assertEquals(false, schema["additionalProperties"].asBoolean())
+                assertEquals(
+                    listOf("PORTFOLIO_ANSWER", "MISSING_EVIDENCE", "GENERAL_CHAT"),
+                    schema["properties"]["intent"]["enum"].values().map { it.stringValue() }
+                )
+                assertEquals(
+                    listOf("project_ESM_로그인_개편"),
+                    schema["properties"]["chunkIds"]["items"]["enum"].values().map { it.stringValue() }
+                )
             }
         }
     }

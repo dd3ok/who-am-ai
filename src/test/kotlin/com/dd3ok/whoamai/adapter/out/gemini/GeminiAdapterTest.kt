@@ -2,6 +2,9 @@ package com.dd3ok.whoamai.adapter.out.gemini
 
 import com.dd3ok.whoamai.common.config.GeminiChatModelProperties
 import com.dd3ok.whoamai.application.port.out.ConversationTopic
+import com.dd3ok.whoamai.application.port.out.PortfolioCatalogEntry
+import com.dd3ok.whoamai.application.port.out.PortfolioSelection
+import com.dd3ok.whoamai.application.port.out.PortfolioSelectionIntent
 import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import kotlinx.coroutines.flow.collect
@@ -13,6 +16,7 @@ import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.openai.OpenAiChatOptions
 import reactor.core.publisher.Flux
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -304,6 +308,64 @@ class GeminiAdapterTest {
         assertEquals("No models configured in Gemini properties.", error.message)
     }
 
+    @Test
+    fun `selectContext returns validated selection and applies selectorReasoningEffort`() = runTest {
+        val model = RecordingStreamingChatModel(
+            listOf(
+                Flux.just(chatResponse("{\"intent\":\"PORTFOLIO_ANSWER\",\"chunkIds\":[\"project_ESM_로그인_개편\",\"project_ESM_로그인_개편\"]}")),
+                Flux.just(chatResponse("{\"intent\":\"MISSING_EVIDENCE\",\"chunkIds\":[]}")),
+                Flux.just(chatResponse("{\"intent\":\"GENERAL_CHAT\",\"chunkIds\":[]}")),
+                Flux.just(chatResponse("최종 답변"))
+            )
+        )
+        val adapter = adapter(
+            streamingModel = model,
+            chatProperties = GeminiChatModelProperties().apply {
+                models = listOf("primary")
+                reasoningEffort = "medium"
+                selectorReasoningEffort = "low"
+            }
+        )
+        val catalog = listOf(
+            PortfolioCatalogEntry("project_ESM_로그인_개편", "project", "ESM 로그인 개편", "GeoIP 로그인 차단", listOf("GeoIP")),
+            PortfolioCatalogEntry("recent_activities", "recent_activities", "최근 활동", "AI 에이전트 학습", listOf("RAG"))
+        )
+
+        val portfolio = adapter.selectContext("GeoIP 로그인 어떻게 구현했어?", emptyList(), catalog)
+        val missing = adapter.selectContext("결혼했나요?", emptyList(), catalog)
+        val chat = adapter.selectContext("오늘 날씨 어때?", emptyList(), catalog)
+        val emptyCatalog = adapter.selectContext("질문", emptyList(), emptyList())
+        adapter.generateChatContent(listOf(ChatMessage("user", "안녕"))).toList()
+
+        assertEquals(PortfolioSelection(PortfolioSelectionIntent.PORTFOLIO_ANSWER, listOf("project_ESM_로그인_개편")), portfolio)
+        assertEquals(PortfolioSelection(PortfolioSelectionIntent.MISSING_EVIDENCE, emptyList()), missing)
+        assertEquals(PortfolioSelection(PortfolioSelectionIntent.GENERAL_CHAT, emptyList()), chat)
+        assertEquals(PortfolioSelection(PortfolioSelectionIntent.MISSING_EVIDENCE, emptyList()), emptyCatalog)
+        assertEquals(listOf<String?>("low", "low", "low", "medium"), model.requestedReasoningEfforts)
+    }
+
+    @Test
+    fun `selectContext rejects unknown chunkIds inconsistent payloads and malformed json`() = runTest {
+        val catalog = listOf(PortfolioCatalogEntry("recent_activities", "recent_activities", "최근 활동", "요약", emptyList()))
+        for (json in listOf(
+            "{}",
+            "{\"intent\":\"UNKNOWN\",\"chunkIds\":[]}",
+            "{\"intent\":\"PORTFOLIO_ANSWER\",\"chunkIds\":[]}",
+            "{\"intent\":\"PORTFOLIO_ANSWER\",\"chunkIds\":[\"invented_id\"]}",
+            "{\"intent\":\"PORTFOLIO_ANSWER\",\"chunkIds\":[123]}",
+            "{\"intent\":\"GENERAL_CHAT\",\"chunkIds\":[\"recent_activities\"]}",
+            "{\"intent\":\"MISSING_EVIDENCE\",\"chunkIds\":[\"recent_activities\"]}",
+            "{\"intent\":\"GENERAL_CHAT\",\"chunkIds\":[],\"extra\":true}",
+            "{\"intent\":\"GENERAL_CHAT\",\"chunkIds\":[]} trailing"
+        )) {
+            val model = RecordingStreamingChatModel(listOf(Flux.just(chatResponse(json))))
+            assertFailsWith<Exception>("Expected failure for: $json") {
+                adapter(model).selectContext("테스트 질문", emptyList(), catalog)
+            }
+            assertEquals(1, model.callCount)
+        }
+    }
+
     private fun adapter(
         streamingModel: RecordingStreamingChatModel,
         chatProperties: GeminiChatModelProperties = GeminiChatModelProperties().apply {
@@ -324,9 +386,11 @@ class GeminiAdapterTest {
     ) : org.springframework.ai.chat.model.StreamingChatModel {
         var callCount: Int = 0
         val requestedModels = mutableListOf<String>()
+        val requestedReasoningEfforts = mutableListOf<String?>()
 
         override fun stream(prompt: Prompt): Flux<ChatResponse> {
             requestedModels += requireNotNull(prompt.options?.model)
+            requestedReasoningEfforts += (prompt.options as? OpenAiChatOptions)?.reasoningEffort
             val response = responses.getOrElse(callCount) { Flux.error(IllegalStateException("unexpected call")) }
             callCount += 1
             return response

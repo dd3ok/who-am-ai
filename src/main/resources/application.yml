@@ -98,6 +98,7 @@ who-am-ai:
       # https://ai.google.dev/gemini-api/docs/openai#thinking
       models: [gemini-3.8-flash]
       reasoning-effort: medium
+      selector-reasoning-effort: low
       max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000
     cache:
