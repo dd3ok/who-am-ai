@@ -58,4 +58,18 @@ class ClientIpResolverTest {
         val proxy = InetSocketAddress(InetAddress.getByName("10.0.0.5"), 8080)
         assertEquals("2001:db8:0:0:0:0:0:1", resolver.resolve(headers, proxy))
     }
+
+    @Test
+    fun `falls back to X-Forwarded-For when single-ip edge headers are disabled`() {
+        val xffOnlyResolver = ClientIpResolver(
+            ChatAccessProperties(trustedProxyHops = 1, trustSingleIpProxyHeaders = false)
+        )
+        val headers = HttpHeaders().apply {
+            add("True-Client-IP", "8.8.8.8")
+            add("CF-Connecting-IP", "1.1.1.1")
+            add("X-Forwarded-For", "198.51.100.77")
+        }
+        val proxy = InetSocketAddress(InetAddress.getByName("10.0.0.5"), 8080)
+        assertEquals("198.51.100.77", xffOnlyResolver.resolve(headers, proxy))
+    }
 }

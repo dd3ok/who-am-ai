@@ -24,11 +24,13 @@ class ClientIpResolver(
             return fallbackIp
         }
 
-        for (headerName in SINGLE_IP_PROXY_HEADERS) {
-            val headerValue = headers.getFirst(headerName)
-            val parsed = parseIpLiteral(headerValue)
-            if (parsed != null) {
-                return parsed
+        if (properties.trustSingleIpProxyHeaders) {
+            for (headerName in SINGLE_IP_PROXY_HEADERS) {
+                val headerValue = headers.getFirst(headerName)
+                val parsed = parseIpLiteral(headerValue)
+                if (parsed != null) {
+                    return parsed
+                }
             }
         }
 

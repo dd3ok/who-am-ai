@@ -44,7 +44,7 @@ class ChatAccessService internal constructor(
         val now = clock.instant()
         val ipHash = hash(clientIp)
         checkBlocked(ipHash, now)
-        consumeIpMinute("sessions:ip:$ipHash", properties.sessionsPerIpPerMinute, ipHash, now)
+        consumeIpWindow("sessions:ip:$ipHash", MINUTE_SECONDS, properties.sessionsPerIpPerMinute, ipHash, now)
         consumeGlobal("sessions:global", properties.sessionsPerMinute, now)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
         val session = ChatSession(UUID.randomUUID().toString(), now.plusSeconds(properties.sessionLifetimeSeconds))
@@ -57,8 +57,9 @@ class ChatAccessService internal constructor(
         val ipHash = hash(clientIp)
         checkBlocked(ipHash, now)
         // Count failed authentication too, but reject throttled/blocked IPs before charging the shared budget.
-        consumeIpMinute("messages:ip:$ipHash", properties.messagesPerIpPerMinute, ipHash, now)
-        consumeIpDay("messages:ip_day:$ipHash", properties.messagesPerIpPerDay, ipHash, now)
+        consumeIpWindow("messages:ip:$ipHash", MINUTE_SECONDS, properties.messagesPerIpPerMinute, ipHash, now)
+        val dayRemaining = (((now.epochSecond / DAY_SECONDS) + 1) * DAY_SECONDS - now.epochSecond).coerceAtLeast(MINUTE_SECONDS)
+        consumeIpWindow("messages:ip_day:$ipHash", DAY_SECONDS, properties.messagesPerIpPerDay, ipHash, now, dayRemaining)
         consumeGlobal("messages:global", properties.messagesPerMinute, now)
         if (token == null || !TOKEN_PATTERN.matches(token)) throw ChatAccessException("SESSION_REQUIRED")
         val session = store.findSession(hash(token))
@@ -85,24 +86,20 @@ class ChatAccessService internal constructor(
         }
     }
 
-    private suspend fun consumeIpMinute(key: String, limit: Int, ipHash: String, now: Instant) {
+    private suspend fun consumeIpWindow(
+        keyPrefix: String,
+        windowSeconds: Long,
+        limit: Int,
+        ipHash: String,
+        now: Instant,
+        retryAfterSeconds: Long = windowSeconds
+    ) {
         if (limit <= 0) return
-        val minute = now.epochSecond / MINUTE_SECONDS
-        val expiresAt = Instant.ofEpochSecond((minute + 2) * MINUTE_SECONDS)
-        val count = store.incrementRequestCount("$key:$minute", expiresAt)
+        val bucket = now.epochSecond / windowSeconds
+        val expiresAt = Instant.ofEpochSecond((bucket + 2) * windowSeconds)
+        val count = store.incrementRequestCount("$keyPrefix:$bucket", expiresAt)
         if (count > limit) {
-            recordIpViolationAndThrow(ipHash, now, MINUTE_SECONDS)
-        }
-    }
-
-    private suspend fun consumeIpDay(key: String, limit: Int, ipHash: String, now: Instant) {
-        if (limit <= 0) return
-        val day = now.epochSecond / DAY_SECONDS
-        val expiresAt = Instant.ofEpochSecond((day + 2) * DAY_SECONDS)
-        val count = store.incrementRequestCount("$key:$day", expiresAt)
-        if (count > limit) {
-            val defaultRetryAfter = ((day + 1) * DAY_SECONDS - now.epochSecond).coerceAtLeast(MINUTE_SECONDS)
-            recordIpViolationAndThrow(ipHash, now, defaultRetryAfter)
+            recordIpViolationAndThrow(ipHash, now, retryAfterSeconds)
         }
     }
 
@@ -124,10 +121,11 @@ class ChatAccessService internal constructor(
                 Instant.ofEpochSecond((window + 2) * windowSeconds)
             )
             if (violations >= properties.blockViolationThreshold) {
-                val blockUntil = now.plusSeconds(properties.blockDurationSeconds)
+                val blockDuration = maxOf(properties.blockDurationSeconds, defaultRetryAfter)
+                val blockUntil = now.plusSeconds(blockDuration)
                 blockedIpCache[ipHash] = blockUntil
                 store.setBlockExpiry("block:ip:$ipHash", blockUntil)
-                throw ChatAccessException("RATE_LIMITED", properties.blockDurationSeconds)
+                throw ChatAccessException("RATE_LIMITED", blockDuration)
             }
         }
         throw ChatAccessException("RATE_LIMITED", defaultRetryAfter)

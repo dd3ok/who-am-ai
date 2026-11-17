@@ -167,6 +167,33 @@ class ChatAccessServiceTest {
         now = now.plusSeconds(801)
         service.assertNotBlocked("attacker-ip")
     }
+
+    @Test
+    fun `daily quota cooldown preserves full remaining day instead of shortening Retry-After`() = runTest {
+        var now = Instant.parse("2026-11-17T12:00:00Z")
+        val clock = MutableClock(now) { now }
+        val store = InMemoryChatAccessStore()
+        val service = ChatAccessService(store, ChatAccessProperties(
+            messagesPerIpPerMinute = 10,
+            messagesPerIpPerDay = 1,
+            messagesPerSessionPerMinute = 10,
+            blockViolationThreshold = 2,
+            blockDurationSeconds = 900
+        ), clock)
+
+        val grant = service.issueSession("daily-ip")
+        service.authorize(grant.conversationId, grant.sessionToken, "daily-ip")
+
+        val firstReject = assertFailsWith<ChatAccessException> {
+            service.authorize(grant.conversationId, grant.sessionToken, "daily-ip")
+        }
+        assertEquals(43200L, firstReject.retryAfterSeconds)
+
+        val secondReject = assertFailsWith<ChatAccessException> {
+            service.authorize(grant.conversationId, grant.sessionToken, "daily-ip")
+        }
+        assertEquals(43200L, secondReject.retryAfterSeconds)
+    }
 }
 
 private class MutableClock(

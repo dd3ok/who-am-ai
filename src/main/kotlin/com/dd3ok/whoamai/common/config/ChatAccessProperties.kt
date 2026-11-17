@@ -17,5 +17,6 @@ data class ChatAccessProperties(
     var blockViolationWindowSeconds: Long = 300,
     var blockDurationSeconds: Long = 900,
     var trustedProxyHops: Int = 1,
+    var trustSingleIpProxyHeaders: Boolean = true,
     var trustForwardedHeadersFromAllRemotes: Boolean = false
 )
