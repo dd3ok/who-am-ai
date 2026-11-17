@@ -665,8 +665,8 @@ private val EXPERIENCE_ORIENTED_DETAIL_KEYWORDS = normalizedKeywords(
     "역할", "책임", "성과", "강점", "경험", "리딩", "협업", "커뮤니케이션"
 )
 private val BROAD_RULE_RESULTS = setOf("projects", "experiences", "skills")
-private const val CATALOG_SUMMARY_MAX_LENGTH = 160
-private const val CATALOG_KEYWORD_LIMIT = 12
+private const val CATALOG_SUMMARY_MAX_LENGTH = 260
+private const val CATALOG_KEYWORD_LIMIT = 40
 private val TECHNICAL_TOKEN_REGEX = Regex("[A-Za-z][A-Za-z0-9_.+-]{1,}")
 
 private fun isSpecificResumeSlotQuery(normalizedQuery: String): Boolean {

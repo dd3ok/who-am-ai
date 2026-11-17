@@ -14,6 +14,9 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.ai.vectorstore.filter.Filter
+import org.springframework.core.io.ClassPathResource
+import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -440,6 +443,34 @@ class ContextRetrieverTest {
 
         assertEquals(listOf("service_profile", projectId), results.map { it.chunkId })
         assertEquals("정산 플랫폼", results[1].title)
+    }
+
+    @Test
+    fun `real resume catalog retains tail keywords in recent_activities and project bodies`() {
+        val realResume: Resume = ClassPathResource("resume.json").inputStream.use {
+            jacksonObjectMapper().readValue(it)
+        }
+        val retriever = ContextRetriever(
+            persistencePort,
+            object : ResumeProviderPort {
+                override fun getResume(): Resume = realResume
+                override fun isInitialized(): Boolean = true
+            },
+            ownDomainProfileProvider,
+            metadataFilterEnabled = true
+        )
+
+        val catalog = retriever.portfolioCatalog()
+        val recentEntry = catalog.first { it.chunkId == ChunkIdGenerator.forRecentActivities() }
+        val sagaEntry = catalog.first { it.chunkId == ChunkIdGenerator.forProject("commerce-saga") }
+
+        for (expectedKeyword in listOf("isitnowbot", "market-data-skills", "yfinance", "repoclip", "WATCHLIST.md", "boring-backend")) {
+            assertTrue(
+                recentEntry.keywords.any { it.equals(expectedKeyword, ignoreCase = true) },
+                "Expected recent_activities catalog entry to retain keyword '$expectedKeyword', got: ${recentEntry.keywords}"
+            )
+        }
+        assertTrue(sagaEntry.keywords.any { it.equals("Debezium", ignoreCase = true) })
     }
 
     private class FakeResumePersistencePort : ResumePersistencePort {

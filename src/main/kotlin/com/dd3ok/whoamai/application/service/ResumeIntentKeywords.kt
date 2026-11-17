@@ -21,5 +21,5 @@ internal object ResumeIntentKeywords {
         "공백기",
         "개인 프로젝트",
         "개인프로젝트"
-    ).map(::normalizeResumeQuery).distinct()
+    ).map { it.lowercase().replace(Regex("\\s+"), "").replace(Regex("[^\\p{L}\\p{Nd}]"), "") }.distinct()
 }
