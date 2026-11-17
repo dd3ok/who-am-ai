@@ -30,6 +30,8 @@ import org.springframework.web.reactive.socket.WebSocketMessage
 import org.springframework.web.reactive.socket.WebSocketSession
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.Duration
@@ -374,6 +376,58 @@ class StreamChatWebSocketHandlerTest {
         assertEquals(1, useCase.messages.size)
     }
 
+    @Test
+    fun `temporarily blocked forwarded client ip is rejected at handshake before reading frames`() = runBlocking {
+        val accessProps = ChatAccessProperties(
+            sessionsPerIpPerMinute = 1,
+            blockViolationThreshold = 2,
+            blockDurationSeconds = 900
+        )
+        val access = ChatAccessService(InMemoryChatAccessStore(), accessProps)
+        val mapper = jacksonObjectMapper()
+        val useCase = RecordingChatUseCase()
+        val handler = StreamChatWebSocketHandler(useCase, mapper, access, WebSocketProperties(), ClientIpResolver(accessProps))
+        val proxyRemote = InetSocketAddress(InetAddress.getByName("100.64.0.10"), 443)
+
+        val attackerGrant = access.issueSession("203.0.113.55")
+        repeat(2) {
+            runCatching { access.issueSession("203.0.113.55") }
+        }
+
+        val payload = mapper.writeValueAsString(
+            StreamMessage(attackerGrant.conversationId, com.dd3ok.whoamai.domain.MessageType.USER, "hello", attackerGrant.sessionToken)
+        )
+        val attackerSession = RecordingWebSocketSession(
+            origin = "https://dd3ok.github.io",
+            incomingPayloads = listOf(payload),
+            path = "/ws/chat/events",
+            remoteAddress = proxyRemote,
+            trueClientIp = "203.0.113.55"
+        )
+        handler.handle(attackerSession).block(Duration.ofSeconds(1))
+
+        assertEquals(CloseStatus.POLICY_VIOLATION, attackerSession.closedWith)
+        assertEquals(0, attackerSession.sendCalls)
+        assertTrue(useCase.messages.isEmpty())
+
+        // Clean visitor behind the same proxy still connects and receives answers.
+        val cleanGrant = access.issueSession("203.0.113.77")
+        val cleanPayload = mapper.writeValueAsString(
+            StreamMessage(cleanGrant.conversationId, com.dd3ok.whoamai.domain.MessageType.USER, "hello", cleanGrant.sessionToken)
+        )
+        val cleanSession = RecordingWebSocketSession(
+            origin = "https://dd3ok.github.io",
+            incomingPayloads = listOf(cleanPayload),
+            path = "/ws/chat/events",
+            remoteAddress = proxyRemote,
+            trueClientIp = "203.0.113.77"
+        )
+        handler.handle(cleanSession).block(Duration.ofSeconds(1))
+
+        assertEquals(null, cleanSession.closedWith)
+        assertEquals(1, useCase.messages.size)
+    }
+
     private class RecordingChatUseCase : ChatUseCase {
         val messages = mutableListOf<StreamMessage>()
 
@@ -410,7 +464,9 @@ class StreamChatWebSocketHandlerTest {
         origin: String?,
         incomingPayloads: List<String>,
         providedIncomingMessages: List<WebSocketMessage>? = null,
-        private val path: String = "/ws/chat"
+        private val path: String = "/ws/chat",
+        private val remoteAddress: InetSocketAddress? = null,
+        trueClientIp: String? = null
     ) : WebSocketSession {
         private val dataBufferFactory = DefaultDataBufferFactory()
         private val headers = HttpHeaders()
@@ -422,12 +478,22 @@ class StreamChatWebSocketHandlerTest {
 
         init {
             origin?.let { headers.add(HttpHeaders.ORIGIN, it) }
+            trueClientIp?.let { headers.add("True-Client-IP", it) }
         }
 
         override fun getId(): String = "test-session"
 
         override fun getHandshakeInfo(): HandshakeInfo =
-            HandshakeInfo(URI.create("ws://localhost$path"), headers, Mono.empty(), null)
+            HandshakeInfo(
+                URI.create("ws://localhost$path"),
+                headers,
+                org.springframework.util.LinkedMultiValueMap(),
+                Mono.empty(),
+                null,
+                remoteAddress,
+                mutableMapOf(),
+                null
+            )
 
         override fun bufferFactory(): DataBufferFactory = dataBufferFactory
 

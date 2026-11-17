@@ -10,11 +10,13 @@ import com.dd3ok.whoamai.domain.ChatEvent
 import com.dd3ok.whoamai.domain.ChatEventType
 import tools.jackson.core.JacksonException
 import tools.jackson.databind.ObjectMapper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.reactor.asFlux
+import kotlinx.coroutines.reactor.mono
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.socket.CloseStatus
@@ -30,7 +32,8 @@ class StreamChatWebSocketHandler(
     private val chatUseCase: ChatUseCase,
     private val objectMapper: ObjectMapper,
     private val accessService: ChatAccessService,
-    private val webSocketProperties: WebSocketProperties = WebSocketProperties()
+    private val webSocketProperties: WebSocketProperties = WebSocketProperties(),
+    private val clientIpResolver: ClientIpResolver = ClientIpResolver()
 ) : WebSocketHandler {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -41,27 +44,31 @@ class StreamChatWebSocketHandler(
             return session.close(CloseStatus.POLICY_VIOLATION)
         }
 
+        val clientIp = clientIpResolver.resolve(session.handshakeInfo.headers, session.handshakeInfo.remoteAddress)
         val outbound = session.receive()
             .concatMap { message ->
                 // Reactor Netty owns and releases the received payload after this callback.
                 val json = if (message.type != WebSocketMessage.Type.TEXT ||
                     message.payload.readableByteCount() > webSocketProperties.maxMessageBytes
                 ) null else message.payloadAsText
-                responseMessages(session, json)
+                responseMessages(session, json, clientIp)
             }
 
-        return session.send(outbound)
+        return mono(Dispatchers.Unconfined) { accessService.assertNotBlocked(clientIp) }
+            .then(Mono.defer { session.send(outbound) })
+            .onErrorResume(ChatAccessException::class.java) {
+                session.close(CloseStatus.POLICY_VIOLATION)
+            }
     }
 
-    private fun responseMessages(session: WebSocketSession, json: String?): Flux<WebSocketMessage> {
+    private fun responseMessages(session: WebSocketSession, json: String?, clientIp: String): Flux<WebSocketMessage> {
         val eventMode = session.handshakeInfo.uri.path == "/ws/chat/events"
         val requestId = UUID.randomUUID().toString()
         return flow {
             val userMessage = parseClientMessage(json ?: throw InvalidClientMessageException())
             validate(userMessage)
             withTimeout(webSocketProperties.responseTimeoutMs) {
-                accessService.authorize(userMessage.uuid, userMessage.sessionToken,
-                    session.handshakeInfo.remoteAddress?.address?.hostAddress ?: "unknown")
+                accessService.authorize(userMessage.uuid, userMessage.sessionToken, clientIp)
                 val authorizedMessage = userMessage.copy(sessionToken = null)
                 if (eventMode) {
                     chatUseCase.streamChatEvents(authorizedMessage).collect { event ->

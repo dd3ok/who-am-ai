@@ -62,7 +62,12 @@ chat-access:
   sessions-per-minute: 60
   messages-per-session-per-minute: 10
   messages-per-ip-per-minute: 30
+  messages-per-ip-per-day: 150
   messages-per-minute: 120
+  block-violation-threshold: 5
+  block-violation-window-seconds: 300
+  block-duration-seconds: 900
+  trusted-proxy-hops: 1
 
 websocket:
   allow-null-origin: false

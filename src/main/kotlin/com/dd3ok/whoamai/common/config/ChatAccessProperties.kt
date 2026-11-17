@@ -11,5 +11,12 @@ data class ChatAccessProperties(
     var sessionsPerMinute: Int = 60,
     var messagesPerSessionPerMinute: Int = 10,
     var messagesPerIpPerMinute: Int = 30,
-    var messagesPerMinute: Int = 120
+    var messagesPerIpPerDay: Int = 150,
+    var messagesPerMinute: Int = 120,
+    var blockViolationThreshold: Int = 5,
+    var blockViolationWindowSeconds: Long = 300,
+    var blockDurationSeconds: Long = 900,
+    var trustedProxyHops: Int = 1,
+    var trustSingleIpProxyHeaders: Boolean = true,
+    var trustForwardedHeadersFromAllRemotes: Boolean = false
 )
