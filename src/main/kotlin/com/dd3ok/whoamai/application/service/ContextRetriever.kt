@@ -31,27 +31,25 @@ class ContextRetriever(
     private val logger = LoggerFactory.getLogger(javaClass)
     private val filterExpressionBuilder = FilterExpressionBuilder()
 
-    private val rules: List<(RuleContext) -> String?> by lazy {
-        listOf(
-            { ctx -> if (RECENT_ACTIVITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forRecentActivities() else null },
-            { ctx -> if (TOTAL_EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
-            { ctx -> if (PROJECT_KEYWORDS.any { ctx.query.contains(it) }) "projects" else null },
-            { ctx -> if (EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) "experiences" else null },
-            { ctx -> if (CERTIFICATE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forCertificates() else null },
-            { ctx -> if (INTEREST_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forInterests() else null },
-            { ctx -> if (SKILL_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forSkills() else null },
-            { ctx -> if (EDU_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forEducation() else null },
-            { ctx -> if (PERSONALITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forMbti() else null },
-            { ctx -> if (HOBBY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forHobbies() else null },
-            { ctx ->
-                val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
-                val matchesName = NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)
-                if (matchesIntro && matchesName && !isSpecificResumeSlotQuery(ctx.query)) {
-                    ChunkIdGenerator.forSummary()
-                } else null
-            }
-        )
-    }
+    private val rules: List<(RuleContext) -> String?> = listOf(
+        { ctx -> if (RECENT_ACTIVITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forRecentActivities() else null },
+        { ctx -> if (TOTAL_EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forTotalExperience() else null },
+        { ctx -> if (PROJECT_KEYWORDS.any { ctx.query.contains(it) }) "projects" else null },
+        { ctx -> if (EXPERIENCE_KEYWORDS.any { ctx.query.contains(it) }) "experiences" else null },
+        { ctx -> if (CERTIFICATE_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forCertificates() else null },
+        { ctx -> if (INTEREST_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forInterests() else null },
+        { ctx -> if (SKILL_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forSkills() else null },
+        { ctx -> if (EDU_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forEducation() else null },
+        { ctx -> if (PERSONALITY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forMbti() else null },
+        { ctx -> if (HOBBY_KEYWORDS.any { ctx.query.contains(it) }) ChunkIdGenerator.forHobbies() else null },
+        { ctx ->
+            val matchesIntro = INTRO_KEYWORDS.any { ctx.query.contains(it) }
+            val matchesName = NameFragmentExtractor.matches(ctx.query, ctx.nameFragments)
+            if (matchesIntro && matchesName && !isSpecificResumeSlotQuery(ctx.query)) {
+                ChunkIdGenerator.forSummary()
+            } else null
+        }
+    )
 
     /** Reuse the existing source rules without reading MongoDB or treating assistant prose as evidence. */
     fun conversationTopics(userPrompt: String, history: List<ChatMessage>): List<ConversationTopic> {

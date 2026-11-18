@@ -5,12 +5,14 @@ import com.dd3ok.whoamai.common.config.ChatCacheProperties
 import com.dd3ok.whoamai.domain.CachedChatAnswer
 import com.dd3ok.whoamai.domain.ChatSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.annotation.Id
 import org.springframework.data.domain.Sort
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate
@@ -25,14 +27,23 @@ import java.time.Instant
 import java.util.Collections
 
 @Repository
-class MongoChatAnswerCacheAdapter(
+class MongoChatAnswerCacheAdapter @Autowired constructor(
     private val mongoTemplate: ReactiveMongoTemplate,
     private val properties: ChatCacheProperties = ChatCacheProperties()
-) : ChatAnswerCacheStore {
+) : ChatAnswerCacheStore, MongoIndexWarmupTarget {
+
+    internal constructor(
+        mongoTemplate: ReactiveMongoTemplate,
+        properties: ChatCacheProperties = ChatCacheProperties(),
+        indexSetupTimeoutMs: Long
+    ) : this(mongoTemplate, properties) {
+        this.indexSetupTimeoutMs = indexSetupTimeoutMs
+    }
 
     private val logger = LoggerFactory.getLogger(javaClass)
     private val indexMutex = Mutex()
     @Volatile private var indexesReady = false
+    private var indexSetupTimeoutMs: Long = 30_000L
 
     private val memoryCache: MutableMap<String, MemoryCacheItem> = Collections.synchronizedMap(
         object : LinkedHashMap<String, MemoryCacheItem>(64, 0.75f, true) {
@@ -41,9 +52,11 @@ class MongoChatAnswerCacheAdapter(
         }
     )
 
+    override suspend fun warmUp() = ensureIndexes()
+
     private suspend fun ensureIndexes() {
         if (indexesReady) return
-        withTimeout(30_000) {
+        withTimeout(indexSetupTimeoutMs) {
             indexMutex.withLock {
                 if (!indexesReady) {
                     mongoTemplate.indexOps(ChatAnswerCacheDocument::class.java).ensureIndex(
@@ -65,7 +78,12 @@ class MongoChatAnswerCacheAdapter(
             memoryCache.remove(cacheKey)
         }
 
-        return try {
+        return runCacheOpSafely(
+            fallback = null,
+            onFailure = { e ->
+                logger.warn("Chat answer cache lookup failed for key {}. Falling back to live RAG.", cacheKey, e)
+            }
+        ) {
             ensureIndexes()
             val document = mongoTemplate.findById(cacheKey, ChatAnswerCacheDocument::class.java)
                 .awaitSingleOrNull()
@@ -76,11 +94,6 @@ class MongoChatAnswerCacheAdapter(
             memoryCache[cacheKey] = MemoryCacheItem(entry, document.expiresAt)
             incrementHitCountSafely(cacheKey)
             entry
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn("Chat answer cache lookup failed for key {}. Falling back to live RAG.", cacheKey, e)
-            null
         }
     }
 
@@ -88,7 +101,12 @@ class MongoChatAnswerCacheAdapter(
         if (!expiresAt.isAfter(Instant.now())) return
         memoryCache[entry.cacheKey] = MemoryCacheItem(entry, expiresAt)
 
-        try {
+        runCacheOpSafely(
+            fallback = Unit,
+            onFailure = { e ->
+                logger.warn("Chat answer cache save failed for key {}. Continuing without persisted cache.", entry.cacheKey, e)
+            }
+        ) {
             ensureIndexes()
             val document = ChatAnswerCacheDocument(
                 cacheKey = entry.cacheKey,
@@ -101,37 +119,47 @@ class MongoChatAnswerCacheAdapter(
                 expiresAt = expiresAt
             )
             mongoTemplate.save(document).awaitSingle()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn("Chat answer cache save failed for key {}. Continuing without persisted cache.", entry.cacheKey, e)
         }
     }
 
     override suspend fun deleteAll() {
         memoryCache.clear()
-        try {
+        runCacheOpSafely(
+            fallback = Unit,
+            onFailure = { e -> logger.warn("Failed to clear chat answer cache documents.", e) }
+        ) {
             ensureIndexes()
             mongoTemplate.remove(Query(), ChatAnswerCacheDocument::class.java).awaitSingleOrNull()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.warn("Failed to clear chat answer cache documents.", e)
         }
     }
 
     private suspend fun incrementHitCountSafely(cacheKey: String) {
-        try {
+        runCacheOpSafely(
+            fallback = Unit,
+            onFailure = { e -> logger.debug("Ignoring hitCount update failure for cache key {}.", cacheKey, e) }
+        ) {
             mongoTemplate.updateFirst(
                 Query(Criteria.where("_id").`is`(cacheKey)),
                 Update().inc("hitCount", 1L),
                 ChatAnswerCacheDocument::class.java
             ).awaitSingleOrNull()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.debug("Ignoring hitCount update failure for cache key {}.", cacheKey, e)
         }
+    }
+
+    private suspend inline fun <T> runCacheOpSafely(
+        fallback: T,
+        onFailure: (Exception) -> Unit,
+        block: () -> T
+    ): T = try {
+        block()
+    } catch (e: TimeoutCancellationException) {
+        onFailure(e)
+        fallback
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        onFailure(e)
+        fallback
     }
 
     private data class MemoryCacheItem(val entry: CachedChatAnswer, val expiresAt: Instant)
