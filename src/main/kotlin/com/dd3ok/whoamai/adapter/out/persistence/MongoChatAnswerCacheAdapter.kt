@@ -28,11 +28,13 @@ import java.util.Collections
 class MongoChatAnswerCacheAdapter(
     private val mongoTemplate: ReactiveMongoTemplate,
     private val properties: ChatCacheProperties = ChatCacheProperties()
-) : ChatAnswerCacheStore {
+) : ChatAnswerCacheStore, MongoIndexWarmupTarget {
 
     private val logger = LoggerFactory.getLogger(javaClass)
     private val indexMutex = Mutex()
     @Volatile private var indexesReady = false
+
+    override suspend fun warmUp() = ensureIndexes()
 
     private val memoryCache: MutableMap<String, MemoryCacheItem> = Collections.synchronizedMap(
         object : LinkedHashMap<String, MemoryCacheItem>(64, 0.75f, true) {

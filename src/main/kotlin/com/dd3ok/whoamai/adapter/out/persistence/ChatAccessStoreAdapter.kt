@@ -22,9 +22,11 @@ import java.time.Duration
 import java.time.Instant
 
 @Repository
-class ChatAccessStoreAdapter(private val mongoTemplate: ReactiveMongoTemplate) : ChatAccessStore {
+class ChatAccessStoreAdapter(private val mongoTemplate: ReactiveMongoTemplate) : ChatAccessStore, MongoIndexWarmupTarget {
     private val indexMutex = Mutex()
     @Volatile private var indexesReady = false
+
+    override suspend fun warmUp() = ensureIndexes()
 
     // Keep application liveness independent of MongoDB; chat access still requires successful index setup.
     private suspend fun ensureIndexes() {

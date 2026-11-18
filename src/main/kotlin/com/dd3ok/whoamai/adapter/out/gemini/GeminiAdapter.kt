@@ -46,12 +46,11 @@ class GeminiAdapter(
     private val rateLimitedUntilByModel = ConcurrentHashMap<String, Long>()
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build())
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build()
-    private val followUpInstruction by lazy {
-        ClassPathResource("prompts/follow-up.st").inputStream.bufferedReader().use { it.readText() }
-    }
-    private val catalogSelectorInstruction by lazy {
-        ClassPathResource("prompts/catalog-selector.st").inputStream.bufferedReader().use { it.readText() }
-    }
+    private val followUpInstruction: String = readPromptResource("prompts/follow-up.st")
+    private val catalogSelectorInstruction: String = readPromptResource("prompts/catalog-selector.st")
+
+    private fun readPromptResource(path: String): String =
+        ClassPathResource(path).inputStream.bufferedReader().use { it.readText() }
 
     override suspend fun selectTopic(question: String, history: List<ChatMessage>, topics: List<ConversationTopic>): ConversationTopic? {
         if (topics.isEmpty()) return null

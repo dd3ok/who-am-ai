@@ -46,6 +46,18 @@ class PromptTemplateServiceTest {
         assertEquals(false, rendered.contains("{question}"))
     }
 
+    @Test
+    fun `missing prompt template fails eagerly on startup construction`() {
+        assertThrows<IllegalStateException> {
+            PromptTemplateService(
+                resourceLoader = DefaultResourceLoader(),
+                promptProperties = PromptProperties(
+                    systemPath = "classpath:prompts/does-not-exist.st"
+                )
+            )
+        }
+    }
+
     private fun promptService(
         system: String = "system",
         routingInstruction: String = "routing",

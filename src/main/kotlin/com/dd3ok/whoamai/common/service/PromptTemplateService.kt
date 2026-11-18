@@ -31,7 +31,7 @@ class PromptTemplateService(
 ) : PromptProvider {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    private val templates: Map<TemplateType, String> by lazy { loadTemplates() }
+    private val templates: Map<TemplateType, String> = loadTemplates()
 
     override fun systemInstruction(): String = templates.getValue(TemplateType.SYSTEM)
 
