@@ -25,6 +25,7 @@ import tools.jackson.databind.json.JsonMapper
 import tools.jackson.module.kotlin.KotlinModule
 import java.time.Duration
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
 
 @Component
 @Primary
@@ -35,6 +36,7 @@ class GeminiDecisionAdapter @Autowired constructor(
 ) : ConversationTopicPort, PortfolioCatalogSelectorPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val rateLimitedUntilEpochMs = AtomicLong(0L)
     private val webClient: WebClient = WebClient.builder().build()
     private val mapper = JsonMapper.builder()
         .addModule(KotlinModule.Builder().build())
@@ -50,6 +52,27 @@ class GeminiDecisionAdapter @Autowired constructor(
         if (!decisionProperties.enabled) {
             return fallbackAdapter?.selectTopic(question, history, topics)
         }
+        return try {
+            selectTopicViaDecisions(question, history, topics)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val fallback = fallbackAdapter ?: throw e
+            meterRegistry.counter(
+                "whoamai.chat.gemini.decision.fallback.total",
+                "operation", "topic",
+                "model", decisionProperties.model.trim()
+            ).increment()
+            logger.warn("Gemini Decisions topic selection failed. Falling back to GeminiAdapter.", e)
+            fallback.selectTopic(question, history, topics)
+        }
+    }
+
+    private suspend fun selectTopicViaDecisions(
+        question: String,
+        history: List<ChatMessage>,
+        topics: List<ConversationTopic>
+    ): ConversationTopic? {
         check(topics.size <= MAX_TOPIC_CANDIDATES) {
             "Conversation topics exceed Decisions API limit ($MAX_TOPIC_CANDIDATES)."
         }
@@ -246,6 +269,15 @@ class GeminiDecisionAdapter @Autowired constructor(
         val baseUrl = decisionProperties.baseUrl.trim().trimEnd('/')
         check(baseUrl.isNotBlank()) { "Gemini Decisions base URL is not configured." }
 
+        if (isCoolingDown()) {
+            meterRegistry.counter(
+                "whoamai.chat.gemini.decision.cooldown_skipped.total",
+                "operation", operation,
+                "model", model
+            ).increment()
+            throw IllegalStateException("Gemini Decisions model $model is cooling down after rate limit.")
+        }
+
         meterRegistry.counter(
             "whoamai.chat.gemini.decision.attempt.total",
             "operation", operation,
@@ -272,6 +304,9 @@ class GeminiDecisionAdapter @Autowired constructor(
             throw e
         } catch (e: Throwable) {
             val reason = classifyErrorReason(e)
+            if (reason == "http_429") {
+                markRateLimited()
+            }
             recordDecisionError(operation, model, reason)
             logger.warn("Gemini Decisions API call failed (operation={}, model={}, reason={}).", operation, model, reason)
             throw IllegalStateException("Gemini Decisions API call failed ($reason).", e)
@@ -303,6 +338,22 @@ class GeminiDecisionAdapter @Autowired constructor(
             "Decision field '$fieldName' is out of range [0.0, 1.0]: $value"
         }
         return value
+    }
+
+    private fun isCoolingDown(now: Long = System.currentTimeMillis()): Boolean {
+        val until = rateLimitedUntilEpochMs.get()
+        if (until <= 0L) return false
+        if (until <= now) {
+            rateLimitedUntilEpochMs.compareAndSet(until, 0L)
+            return false
+        }
+        return true
+    }
+
+    private fun markRateLimited() {
+        val cooldownMs = decisionProperties.rateLimitCooldownMs
+        if (cooldownMs <= 0L) return
+        rateLimitedUntilEpochMs.set(System.currentTimeMillis() + cooldownMs)
     }
 
     private fun recordDecisionError(operation: String, model: String, reason: String) {

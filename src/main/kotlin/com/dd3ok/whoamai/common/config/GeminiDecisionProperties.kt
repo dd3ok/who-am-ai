@@ -13,5 +13,6 @@ data class GeminiDecisionProperties(
     var chunkNoulThreshold: Double = 0.50,
     var chunkFallbackNoulThreshold: Double = 0.35,
     var chunkHighConfidenceRescueThreshold: Double = 0.85,
-    var maxSelectedChunks: Int = 8
+    var maxSelectedChunks: Int = 8,
+    var rateLimitCooldownMs: Long = 60_000L
 )

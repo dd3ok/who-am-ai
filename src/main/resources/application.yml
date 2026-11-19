@@ -112,6 +112,7 @@ who-am-ai:
       chunk-fallback-noul-threshold: 0.35
       chunk-high-confidence-rescue-threshold: 0.85
       max-selected-chunks: 8
+      rate-limit-cooldown-ms: 60000
     cache:
       enabled: true
       ttl-seconds: 604800

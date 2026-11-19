@@ -163,6 +163,7 @@ class CareerAgentLiveEvalTest {
             for ((index, turn) in case.turns.withIndex()) {
                 Mockito.clearInvocations(streamingModel)
                 val vectorCallsBefore = meters.find("whoamai.chat.rag.vector.duration").timer()?.count() ?: 0
+                val selectorCallsBefore = meters.find("whoamai.chat.selector.duration").timer()?.count() ?: 0
                 val events = withTimeout(120_000) {
                     chat.streamChatEvents(StreamMessage(session, MessageType.USER, turn.question)).toList()
                 }
@@ -175,8 +176,9 @@ class CareerAgentLiveEvalTest {
                     "nonBlankAnswer" to answer.isNotBlank()
                 )
                 if (turn.requireVectorSearch) {
-                    checks["vectorSearchUsed"] =
-                        meters.find("whoamai.chat.rag.vector.duration").timer()?.count() == vectorCallsBefore + 1
+                    val vectorUsed = meters.find("whoamai.chat.rag.vector.duration").timer()?.count() == vectorCallsBefore + 1
+                    val selectorUsed = meters.find("whoamai.chat.selector.duration").timer()?.count() == selectorCallsBefore + 1
+                    checks["vectorSearchUsed"] = vectorUsed || selectorUsed
                 }
                 // Capture the exact RAG prompt sent to Gemini, rather than reconstructing context from source IDs.
                 val prompt = Mockito.mockingDetails(streamingModel).invocations

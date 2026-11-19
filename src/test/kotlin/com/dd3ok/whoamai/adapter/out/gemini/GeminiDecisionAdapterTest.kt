@@ -10,7 +10,7 @@ import com.dd3ok.whoamai.common.service.PromptProvider
 import com.dd3ok.whoamai.domain.ChatMessage
 import com.sun.net.httpserver.HttpServer
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.springframework.ai.chat.messages.AssistantMessage
@@ -35,7 +35,7 @@ class GeminiDecisionAdapterTest {
     private val asciiKeyRegex = Regex("^[A-Za-z0-9_-]{1,64}$")
 
     @Test
-    fun `selectTopic sends choice question to v1beta decisions and resolves selected topic`() = runTest {
+    fun `selectTopic sends choice question to v1beta decisions and resolves selected topic`() = runBlocking {
         val loginTopic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
         val sellerTopic = ConversationTopic("ESM 셀러딜", listOf("project_ESM_셀러딜"))
         val responseJson = """
@@ -98,7 +98,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `selectTopic returns null on none choice low confidence or empty candidates`() = runTest {
+    fun `selectTopic returns null on none choice low confidence or empty candidates`() = runBlocking {
         val topic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
         val noneResponse = """
             {
@@ -142,7 +142,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `selectTopic rejects malformed answers unknown choice keys and HTTP errors`() = runTest {
+    fun `selectTopic rejects malformed answers unknown choice keys and HTTP errors`() = runBlocking {
         val topic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
         val badResponses = listOf(
             HttpStubResponse(200, "application/json", """{"answers":{}}"""),
@@ -170,7 +170,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `selectContext sends 1 choice and N ASCII noul questions for Korean chunkIds and ranks multi-chunk results`() = runTest {
+    fun `selectContext sends 1 choice and N ASCII noul questions for Korean chunkIds and ranks multi-chunk results`() = runBlocking {
         val catalog = listOf(
             PortfolioCatalogEntry("experience_지마켓", "experience", "지마켓 경력", "백엔드 엔지니어", listOf("Gmarket", "Java")),
             PortfolioCatalogEntry("project_ESM_로그인_개편", "project", "ESM 로그인 개편", "GeoIP 로그인 차단", listOf("GeoIP", "Redis")),
@@ -234,7 +234,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `selectContext applies fallback threshold demotion and high confidence rescue calibration rules`() = runTest {
+    fun `selectContext applies fallback threshold demotion and high confidence rescue calibration rules`() = runBlocking {
         val catalog = listOf(
             PortfolioCatalogEntry("experience_지마켓", "experience", "지마켓 경력", "백엔드", listOf("Gmarket")),
             PortfolioCatalogEntry("project_ESM_로그인_개편", "project", "ESM 로그인 개편", "GeoIP", listOf("GeoIP"))
@@ -307,7 +307,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `selectContext rejects inconsistent answers out-of-range probabilities and HTTP errors`() = runTest {
+    fun `selectContext rejects inconsistent answers out-of-range probabilities and HTTP errors`() = runBlocking {
         val catalog = listOf(
             PortfolioCatalogEntry("recent_activities", "recent_activities", "최근 활동", "요약", emptyList())
         )
@@ -336,7 +336,7 @@ class GeminiDecisionAdapterTest {
     }
 
     @Test
-    fun `disabled decision properties delegate to fallback GeminiAdapter`() = runTest {
+    fun `disabled decision properties delegate to fallback GeminiAdapter`() = runBlocking {
         val fallbackStreamingModel = object : StreamingChatModel {
             var callCount = 0
             private val responses = listOf(
@@ -373,9 +373,101 @@ class GeminiDecisionAdapterTest {
         assertEquals(2, fallbackStreamingModel.callCount)
     }
 
+    @Test
+    fun `selectTopic falls back to GeminiAdapter on runtime HTTP failure when fallbackAdapter is present`() = runBlocking {
+        val topic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
+        val fallbackStreamingModel = object : StreamingChatModel {
+            var callCount = 0
+            override fun stream(prompt: Prompt): Flux<ChatResponse> {
+                callCount += 1
+                return Flux.just(ChatResponse(listOf(Generation(AssistantMessage("""{"topicIndex":1}""")))))
+            }
+        }
+        val meterRegistry = SimpleMeterRegistry()
+        val fallbackAdapter = GeminiAdapter(
+            streamingChatModel = fallbackStreamingModel,
+            chatModelProperties = GeminiChatModelProperties().apply { models = listOf("gemini-3.8-flash") },
+            promptTemplateService = FakePromptProvider,
+            meterRegistry = meterRegistry
+        )
+
+        withServer(listOf(HttpStubResponse(503, "application/json", """{"error":{"message":"unavailable"}}"""))) { baseUrl, requests ->
+            val decisionAdapter = adapter(
+                baseUrl = baseUrl,
+                meterRegistry = meterRegistry,
+                fallbackAdapter = fallbackAdapter
+            )
+
+            val selected = decisionAdapter.selectTopic("얼마나 빨라졌어?", emptyList(), listOf(topic))
+
+            assertEquals(topic, selected)
+            assertEquals(1, requests.size)
+            assertEquals(1, fallbackStreamingModel.callCount)
+            assertEquals(
+                1.0,
+                meterRegistry.find("whoamai.chat.gemini.decision.fallback.total")
+                    .tag("operation", "topic").counter()?.count()
+            )
+        }
+    }
+
+    @Test
+    fun `rate limited 429 response triggers cooldown and skips subsequent decision HTTP calls`() = runBlocking {
+        val catalog = listOf(
+            PortfolioCatalogEntry("recent_activities", "recent_activities", "최근 활동", "요약", emptyList())
+        )
+        val topic = ConversationTopic("ESM 로그인 개편", listOf("project_ESM_로그인_개편"))
+        val fallbackStreamingModel = object : StreamingChatModel {
+            var callCount = 0
+            override fun stream(prompt: Prompt): Flux<ChatResponse> {
+                callCount += 1
+                return Flux.just(ChatResponse(listOf(Generation(AssistantMessage("""{"topicIndex":1}""")))))
+            }
+        }
+        val meterRegistry = SimpleMeterRegistry()
+        val fallbackAdapter = GeminiAdapter(
+            streamingChatModel = fallbackStreamingModel,
+            chatModelProperties = GeminiChatModelProperties().apply { models = listOf("gemini-3.8-flash") },
+            promptTemplateService = FakePromptProvider,
+            meterRegistry = meterRegistry
+        )
+
+        withServer(listOf(HttpStubResponse(429, "application/json", """{"error":{"message":"quota exhausted"}}"""))) { baseUrl, requests ->
+            val decisionAdapter = adapter(
+                baseUrl = baseUrl,
+                meterRegistry = meterRegistry,
+                fallbackAdapter = fallbackAdapter
+            )
+
+            assertFailsWith<IllegalStateException> {
+                decisionAdapter.selectContext("질문", emptyList(), catalog)
+            }
+            val cooldownError = assertFailsWith<IllegalStateException> {
+                decisionAdapter.selectContext("두 번째 질문", emptyList(), catalog)
+            }
+            assertTrue(cooldownError.message.orEmpty().contains("cooling down"))
+
+            val topicViaFallback = decisionAdapter.selectTopic("얼마나 빨라졌어?", emptyList(), listOf(topic))
+            assertEquals(topic, topicViaFallback)
+            assertEquals(1, requests.size)
+            assertEquals(1, fallbackStreamingModel.callCount)
+            assertEquals(
+                1.0,
+                meterRegistry.find("whoamai.chat.gemini.decision.cooldown_skipped.total")
+                    .tag("operation", "catalog").counter()?.count()
+            )
+            assertEquals(
+                1.0,
+                meterRegistry.find("whoamai.chat.gemini.decision.cooldown_skipped.total")
+                    .tag("operation", "topic").counter()?.count()
+            )
+        }
+    }
+
     private fun adapter(
         baseUrl: String,
-        meterRegistry: SimpleMeterRegistry = SimpleMeterRegistry()
+        meterRegistry: SimpleMeterRegistry = SimpleMeterRegistry(),
+        fallbackAdapter: GeminiAdapter? = null
     ): GeminiDecisionAdapter {
         return GeminiDecisionAdapter(
             decisionProperties = GeminiDecisionProperties(
@@ -385,14 +477,15 @@ class GeminiDecisionAdapterTest {
                 model = "gemini-decision-1",
                 timeoutMs = 2_000L
             ),
-            meterRegistry = meterRegistry
+            meterRegistry = meterRegistry,
+            fallbackAdapter = fallbackAdapter
         )
     }
 
-    private fun withServer(
+    private suspend fun withServer(
         responses: List<HttpStubResponse>,
         action: suspend (String, List<RecordedRequest>) -> Unit
-    ) = kotlinx.coroutines.runBlocking {
+    ) {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         var cursor = 0

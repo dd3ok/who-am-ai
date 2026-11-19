@@ -47,7 +47,8 @@ class GeminiChatModelPropertiesTest {
                 "who-am-ai.ai.decision.chunk-noul-threshold=0.55",
                 "who-am-ai.ai.decision.chunk-fallback-noul-threshold=0.40",
                 "who-am-ai.ai.decision.chunk-high-confidence-rescue-threshold=0.90",
-                "who-am-ai.ai.decision.max-selected-chunks=6"
+                "who-am-ai.ai.decision.max-selected-chunks=6",
+                "who-am-ai.ai.decision.rate-limit-cooldown-ms=45000"
             )
             .run { context ->
                 val properties = context.getBean(GeminiDecisionProperties::class.java)
@@ -62,6 +63,7 @@ class GeminiChatModelPropertiesTest {
                 assertEquals(0.40, properties.chunkFallbackNoulThreshold)
                 assertEquals(0.90, properties.chunkHighConfidenceRescueThreshold)
                 assertEquals(6, properties.maxSelectedChunks)
+                assertEquals(45_000L, properties.rateLimitCooldownMs)
             }
     }
 
