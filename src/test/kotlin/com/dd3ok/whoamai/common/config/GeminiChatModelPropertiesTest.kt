@@ -33,7 +33,45 @@ class GeminiChatModelPropertiesTest {
             }
     }
 
+    @Test
+    fun `binds custom Gemini decision properties from app namespace`() {
+        ApplicationContextRunner()
+            .withUserConfiguration(DecisionTestConfig::class.java)
+            .withPropertyValues(
+                "who-am-ai.ai.decision.enabled=false",
+                "who-am-ai.ai.decision.base-url=http://127.0.0.1:8089/v1beta",
+                "who-am-ai.ai.decision.api-key=decision-prop-test",
+                "who-am-ai.ai.decision.model=gemini-decision-1",
+                "who-am-ai.ai.decision.timeout-ms=3200",
+                "who-am-ai.ai.decision.topic-confidence-threshold=0.65",
+                "who-am-ai.ai.decision.chunk-noul-threshold=0.55",
+                "who-am-ai.ai.decision.chunk-fallback-noul-threshold=0.40",
+                "who-am-ai.ai.decision.chunk-high-confidence-rescue-threshold=0.90",
+                "who-am-ai.ai.decision.max-selected-chunks=6",
+                "who-am-ai.ai.decision.rate-limit-cooldown-ms=45000"
+            )
+            .run { context ->
+                val properties = context.getBean(GeminiDecisionProperties::class.java)
+
+                assertEquals(false, properties.enabled)
+                assertEquals("http://127.0.0.1:8089/v1beta", properties.baseUrl)
+                assertEquals("decision-prop-test", properties.apiKey)
+                assertEquals("gemini-decision-1", properties.model)
+                assertEquals(3200L, properties.timeoutMs)
+                assertEquals(0.65, properties.topicConfidenceThreshold)
+                assertEquals(0.55, properties.chunkNoulThreshold)
+                assertEquals(0.40, properties.chunkFallbackNoulThreshold)
+                assertEquals(0.90, properties.chunkHighConfidenceRescueThreshold)
+                assertEquals(6, properties.maxSelectedChunks)
+                assertEquals(45_000L, properties.rateLimitCooldownMs)
+            }
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(GeminiChatModelProperties::class)
     private class TestConfig
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(GeminiDecisionProperties::class)
+    private class DecisionTestConfig
 }

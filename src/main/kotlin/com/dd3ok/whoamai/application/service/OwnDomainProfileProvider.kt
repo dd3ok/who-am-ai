@@ -8,8 +8,8 @@ class OwnDomainProfileProvider {
     fun serviceProfile(): String =
         "who-am-ai는 유인재가 만든 AI 기반 프로필 서비스입니다. " +
             "Kotlin과 Spring Boot WebFlux 기반으로 구성되어 있으며, Spring AI를 통해 Google Gemini 3.8 Flash(gemini-3.8-flash)로 대화 응답을 생성하고 Gemini 임베딩(gemini-embedding-2, 768차원)과 MongoDB Atlas Vector Search(resume_chunks_embedding2 컬렉션, 기본 유사도 임계값 0.65)로 이력 정보를 검색합니다. " +
-            "질문 처리에는 규칙 기반 검색과 벡터 검색, 질의 토큰·청크 타입 가중치 기반 휴리스틱 리랭킹을 함께 사용합니다. 근거 자료가 비어 있으면 모델을 호출하지 않고 차단해 환각을 막습니다. " +
-            "짧은 후속 질문은 JSON Schema 기반 주제 선택(ConversationTopicPort)과 앞선 사용자 질문의 프로젝트·회사 맥락을 활용해 검색을 보완하고, 참고 자료·답변 조각·완료·오류를 WebSocket 이벤트(/ws/chat/events)로 전달합니다. " +
+            "질문 처리는 2단계 하이브리드 라우팅을 사용합니다: Tier 1 규칙 기반 검색에 매칭되지 않는 세부 질문과 짧은 후속 질문은 비생성형 Gemini Decisions API(gemini-decision-1, GeminiDecisionAdapter, POST /v1beta/decisions 기반 1 choice + N noul)로 카탈로그·주제 선택(PortfolioCatalogSelectorPort, ConversationTopicPort)을 수행하고, 장애 또는 비활성 시 GeminiAdapter(JSON Schema)와 LLMRouter·MongoDB Atlas Vector Search·질의 토큰·청크 타입 가중치 기반 휴리스틱 리랭킹 경로로 폴백합니다. " +
+            "근거 자료가 비어 있으면 모델을 호출하지 않고 차단해 환각을 막으며, 참고 자료·답변 조각·완료·오류를 WebSocket 이벤트(/ws/chat/events)로 전달합니다. " +
             "모델 폴백(GeminiAdapter)은 who-am-ai.ai.chat.models 우선순위 목록을 기준으로 첫 토큰 전 429(Rate Limit)나 빈 스트림 발생 시 해당 모델을 60초 쿨다운(rate-limit-cooldown-ms: 60000) 처리하고 300ms 백오프 후 다음 모델로 전환하는 구조입니다(현재 기본 설정은 gemini-3.8-flash 단일 모델). " +
             "접근 제어와 요청 제한(ChatAccessService)은 POST /api/chat/sessions로 24시간 유효 익명 세션 토큰을 발급하고, MongoDB 분 단위 카운터로 세션당 분당 10회·IP당 분당 30회(세션 발급 5회)·전체 분당 120회(세션 발급 60회) 제한을 적용합니다. " +
             "대화 이력 저장 충돌은 MongoDB ChatHistoryDocument의 revision 필드를 이용한 낙관적 락 조건부 업데이트와 재시도로 처리합니다. " +
