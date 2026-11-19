@@ -59,7 +59,7 @@ class MongoChatAnswerCacheAdapter @Autowired constructor(
         withTimeout(indexSetupTimeoutMs) {
             indexMutex.withLock {
                 if (!indexesReady) {
-                    mongoTemplate.indexOps(ChatAnswerCacheDocument::class.java).ensureIndex(
+                    mongoTemplate.indexOps(ChatAnswerCacheDocument::class.java).createIndex(
                         Index().on("expiresAt", Sort.Direction.ASC).expire(Duration.ZERO)
                     ).awaitSingle()
                     indexesReady = true

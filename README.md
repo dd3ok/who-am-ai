@@ -5,10 +5,11 @@
 ## 주요 기능
 
 - 이력서 JSON 청크 분할과 임베딩 저장
-- 규칙 기반 검색과 벡터 검색을 함께 쓰는 RAG 흐름
+- 2단계 하이브리드 RAG 라우팅 (Tier 1 규칙 기반 검색 + Tier 2 비생성형 `gemini-decision-1` 카탈로그·후속 주제 선택 + `LLMRouter`·MongoDB Atlas Vector Search 폴백)
+- 독립 질문 답변 캐시 (`MongoChatAnswerCacheAdapter`) 및 기동 시 MongoDB 인덱스 백그라운드 워밍업 (`MongoIndexWarmupRunner`)
 - WebSocket 기반 스트리밍 답변
-- Spring AI 2.0 OpenAI 호환 채팅과 Google GenAI 임베딩 연동
-- 모델 요청 제한과 스트리밍 오류 처리
+- Spring AI 2.0 OpenAI 호환 채팅과 Google GenAI 임베딩, `POST /v1beta/decisions` 연동
+- 모델 요청 제한(429 쿨다운)·타임아웃 폴백 및 스트리밍 오류 처리
 - MongoDB Atlas Vector Search 기반 이력 컨텍스트 조회
 - 관리자용 이력서 재색인 API
 - 헬스체크와 Actuator health endpoint
@@ -17,9 +18,10 @@
 
 - 언어 및 런타임: Kotlin 2.3.21, JDK 21
 - 프레임워크: Spring Boot 4.1.0, Spring WebFlux, WebSocket
-- AI: Spring AI 2.0.0, Google Gemini chat / embedding
+- AI: Spring AI 2.0.0, Google Gemini chat / decision / embedding
 - JSON: Jackson 3
 - chat 모델: `gemini-3.8-flash`, reasoning effort `medium`
+- decision 모델: `gemini-decision-1` (`POST /v1beta/decisions`, 0 output tokens)
 - embedding 모델: `gemini-embedding-2`, 768 dimensions
 - 저장소: MongoDB Atlas Vector Search
 - 빌드: Gradle Wrapper
@@ -27,11 +29,11 @@
 ## 동작 흐름
 
 1. `resume.json`을 `ResumeChunkingService`가 이력 항목 단위로 나눕니다.
-2. `MongoVectorAdapter`가 청크를 임베딩하고 MongoDB Atlas에 저장합니다.
-3. `LLMRouter`가 사용자 질문을 보고 `RESUME_RAG` 또는 `NON_RAG`로 분류합니다.
-4. `ContextRetriever`가 먼저 규칙 기반으로 컨텍스트를 찾고, 필요하면 벡터 검색을 사용합니다.
-5. `CareerContextPlanner`와 `CareerPromptAssembler`가 프롬프트 입력을 구성합니다.
-6. `ChatService`가 Gemini 응답을 WebSocket 스트림으로 전달하고 대화 기록을 저장합니다.
+2. `MongoVectorAdapter`가 청크를 임베딩하고 MongoDB Atlas에 저장하며, 앱 기동 시 `MongoIndexWarmupRunner`가 세션·캐시 TTL 인덱스를 비동기로 워밍업합니다.
+3. 독립 질문은 `MongoChatAnswerCacheAdapter`가 캐시 히트 시 페이싱 스트리밍으로 즉시 응답합니다(`TimeoutCancellationException` 발생 시 라이브 RAG로 폴백).
+4. 캐시 미스 또는 멀티턴 질문은 `CareerContextPlanner`가 먼저 후속 주제를 복원(`ConversationTopicPort` / `GeminiDecisionAdapter.selectTopic`)한 뒤 Tier 1 규칙 검색(`ContextRetriever`)을 수행합니다.
+5. Tier 1 미매칭 시 Tier 2 `GeminiDecisionAdapter.selectContext`가 `gemini-decision-1` (`1 choice + N noul`)으로 의도와 관련 청크를 판별하고, 장애 시 `LLMRouter` + MongoDB Atlas Vector Search·휴리스틱 리랭킹으로 폴백합니다.
+6. `CareerPromptAssembler`가 프롬프트 입력을 구성하고, `ChatService`가 근거 부재 시 모델 호출을 차단하거나 `GeminiAdapter` 스트림을 WebSocket으로 전달한 뒤 대화 기록을 저장합니다.
 
 ## API
 
@@ -111,7 +113,7 @@ spring:
             dimensions: 768
 ```
 
-요청별 모델 옵션은 기존 애플리케이션 설정인 `who-am-ai.ai.chat.*`에 둡니다. 모델과 추론 단계는 `spring.ai.openai.chat.*` 기본값과 맞춥니다.
+요청별 모델, Decisions API 및 답변 캐시 옵션은 `who-am-ai.ai.*`에 둡니다. 채팅 모델과 추론 단계는 `spring.ai.openai.chat.*` 기본값과 맞추며, `GEMINI_DECISION_API_KEY`를 별도 지정하지 않으면 `GEMINI_API_KEY`를 재사용합니다.
 
 ```yaml
 who-am-ai:
@@ -119,8 +121,31 @@ who-am-ai:
     chat:
       models: [gemini-3.8-flash]
       reasoning-effort: medium
+      selector-reasoning-effort: low
       max-output-tokens: 8192
       rate-limit-cooldown-ms: 60000
+    decision:
+      enabled: true
+      base-url: https://generativelanguage.googleapis.com/v1beta
+      api-key: ${GEMINI_DECISION_API_KEY:${spring.ai.openai.api-key:}}
+      model: gemini-decision-1
+      timeout-ms: 10000
+      topic-confidence-threshold: 0.55
+      chunk-noul-threshold: 0.50
+      chunk-fallback-noul-threshold: 0.35
+      chunk-high-confidence-rescue-threshold: 0.85
+      max-selected-chunks: 8
+      rate-limit-cooldown-ms: 60000
+    cache:
+      enabled: true
+      ttl-seconds: 604800
+      max-in-memory-entries: 128
+      initial-delay-min-ms: 450
+      initial-delay-max-ms: 700
+      target-stream-duration-ms: 1600
+      chunk-delay-min-ms: 18
+      chunk-delay-max-ms: 32
+      pause-delay-ms: 60
 ```
 
 배포 환경에서 `application.yml`을 수정하지 않고 모델 옵션을 바꾸려면 Spring Boot 설정 방식으로 주입하면 됩니다.
@@ -197,7 +222,7 @@ not generated model text. An `ERROR` event has `code` (`INVALID_MESSAGE`, `TIMEO
 `DONE` follows successful history storage. The portfolio frontend lives in [dd3ok.github.io](https://github.com/dd3ok/dd3ok.github.io).
 
 The defaults limit a frame to 64 KiB, a question to 4,000 characters, a conversation ID to 128 characters,
-and each request to 45 seconds including retrieval and streaming. Configure these under `websocket` in `application.yml`.
+and each request to 120 seconds including retrieval and streaming. Configure these under `websocket` in `application.yml`.
 Both endpoints require a server-issued session. Client-selected UUIDs alone no longer grant access to history.
 Existing unsigned clients must be updated together with the backend; old UUID-only histories are not automatically adopted.
 
@@ -234,11 +259,11 @@ After changing the packaged `resume.json`, redeploy/restart and invoke the authe
 No automatic production reindex runs during build or tests.
 
 Follow-ups use recent user questions to resolve the project, company or profile section before retrieval.
-When existing rules cannot resolve a concrete target, the existing Gemini connection selects from known topics in the last six user turns using structured output. Candidates reuse the existing retrieval rules and retain their source IDs; profile sections such as education and certificates are not collapsed into the owner's name. The model selects a candidate index or no inheritance; it cannot rewrite the question or invent a target or source ID. Selected sources are fetched directly, and unavailable sources stay on the missing-evidence path. This adds one model request only when a prior portfolio topic needs disambiguation, measured by `whoamai.chat.topic.resolve.duration`.
+When existing rules cannot resolve a concrete target, `GeminiDecisionAdapter` (`gemini-decision-1` via `POST /v1beta/decisions`) evaluates candidate topics from the last six user turns as the primary `ConversationTopicPort` (measured by `whoamai.chat.topic.resolve.duration`), and falls back at runtime to `GeminiAdapter` (structured JSON schema output) on provider errors or rate limits. When Tier 1 rules do not match, `PortfolioCatalogSelectorPort` evaluates `PORTFOLIO_ANSWER` / `MISSING_EVIDENCE` / `GENERAL_CHAT` plus per-chunk `noul` probabilities in one Decisions API pass (measured by `whoamai.chat.selector.duration`), falling back to `LLMRouter` and MongoDB Atlas Vector Search if the selector fails. Candidates retain their source IDs; profile sections such as education and certificates are not collapsed into the owner's name. The selector chooses only from supplied candidates or no inheritance; it cannot rewrite the question or invent a target or source ID. Selected sources are fetched directly, and unavailable sources stay on the missing-evidence path.
 New topics and unrelated conversation stop that inheritance. Compound questions can retrieve multiple sections.
 Model-generated text is not used to establish a new topic. Profile capability questions default to portfolio answers;
 general study advice and questions explicitly about another subject remain general conversation.
-Invalid topic responses and provider errors stop the request through the existing error path instead of silently generating an answer without its sources.
+Unrecoverable topic resolution failures and validation errors stop the request through the existing error path instead of silently generating an answer without its sources.
 
 `whoamai.chat.first_token.duration` measures history load, retrieval, and model time up to the first answer token.
 `whoamai.chat.total.duration` includes history persistence. Existing model-only timing metrics remain available.

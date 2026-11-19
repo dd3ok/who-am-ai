@@ -35,7 +35,7 @@ class ChatAccessStoreAdapter(private val mongoTemplate: ReactiveMongoTemplate) :
             indexMutex.withLock {
                 if (!indexesReady) {
                     for (type in listOf(StoredChatSession::class.java, ChatRequestBucket::class.java)) {
-                        mongoTemplate.indexOps(type).ensureIndex(
+                        mongoTemplate.indexOps(type).createIndex(
                             Index().on("expiresAt", Sort.Direction.ASC).expire(Duration.ZERO)
                         ).awaitSingle()
                     }
