@@ -8,7 +8,7 @@ data class GeminiDecisionProperties(
     var baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
     var apiKey: String = "",
     var model: String = "gemini-decision-1",
-    var timeoutMs: Long = 5_000L,
+    var timeoutMs: Long = 10_000L,
     var topicConfidenceThreshold: Double = 0.55,
     var chunkNoulThreshold: Double = 0.50,
     var chunkFallbackNoulThreshold: Double = 0.35,

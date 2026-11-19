@@ -106,7 +106,7 @@ who-am-ai:
       base-url: https://generativelanguage.googleapis.com/v1beta
       api-key: ${GEMINI_DECISION_API_KEY:${spring.ai.openai.api-key:}}
       model: gemini-decision-1
-      timeout-ms: 5000
+      timeout-ms: 10000
       topic-confidence-threshold: 0.55
       chunk-noul-threshold: 0.50
       chunk-fallback-noul-threshold: 0.35
