@@ -293,10 +293,10 @@ class StreamChatWebSocketHandlerTest {
         StreamChatWebSocketHandler(useCase, mapper, accessService).handle(session).block(Duration.ofSeconds(1))
 
         val events = session.sentPayloads.map { mapper.readTree(it) }
-        assertEquals(listOf("SOURCES", "DELTA", "DONE"), events.map { it["type"].asText() })
-        assertEquals("project_1", events.first()["sources"][0]["id"].asText())
-        assertEquals(1, events.map { it["requestId"].asText() }.distinct().size)
-        assertTrue(events.first()["requestId"].asText().isNotBlank())
+        assertEquals(listOf("SOURCES", "DELTA", "DONE"), events.map { it["type"].asString() })
+        assertEquals("project_1", events.first()["sources"][0]["id"].asString())
+        assertEquals(1, events.map { it["requestId"].asString() }.distinct().size)
+        assertTrue(events.first()["requestId"].asString().isNotBlank())
     }
 
     @Test
@@ -314,8 +314,8 @@ class StreamChatWebSocketHandlerTest {
         StreamChatWebSocketHandler(useCase, mapper, accessService).handle(session).block(Duration.ofSeconds(1))
 
         val events = session.sentPayloads.map { mapper.readTree(it) }
-        assertEquals(listOf("DELTA", "ERROR"), events.map { it["type"].asText() })
-        assertEquals("TEMPORARY_ERROR", events.last()["code"].asText())
+        assertEquals(listOf("DELTA", "ERROR"), events.map { it["type"].asString() })
+        assertEquals("TEMPORARY_ERROR", events.last()["code"].asString())
         assertEquals(events.first()["requestId"], events.last()["requestId"])
         assertTrue(!session.sentPayloads.last().contains("internal failure"))
     }
@@ -328,8 +328,8 @@ class StreamChatWebSocketHandlerTest {
         StreamChatWebSocketHandler(DelayedFirstResponseChatUseCase(), mapper, accessService,
             WebSocketProperties(responseTimeoutMs = 10)).handle(session).block(Duration.ofSeconds(1))
         val event = mapper.readTree(session.sentPayloads.single())
-        assertEquals("ERROR", event["type"].asText())
-        assertEquals("TIMEOUT", event["code"].asText())
+        assertEquals("ERROR", event["type"].asString())
+        assertEquals("TIMEOUT", event["code"].asString())
     }
 
     @Test
@@ -367,12 +367,12 @@ class StreamChatWebSocketHandlerTest {
             }
         }
         assertTrue(send("/ws/chat", token = null).sentPayloads.single().contains("session"))
-        assertEquals("SESSION_REQUIRED", mapper.readTree(send("/ws/chat/events", uuid = "victim").sentPayloads.single())["code"].asText())
+        assertEquals("SESSION_REQUIRED", mapper.readTree(send("/ws/chat/events", uuid = "victim").sentPayloads.single())["code"].asString())
         assertTrue(useCase.messages.isEmpty())
         send("/ws/chat/events")
         assertEquals(1, useCase.messages.size)
         assertEquals(null, useCase.messages.single().sessionToken)
-        assertEquals("RATE_LIMITED", mapper.readTree(send("/ws/chat/events").sentPayloads.single())["code"].asText())
+        assertEquals("RATE_LIMITED", mapper.readTree(send("/ws/chat/events").sentPayloads.single())["code"].asString())
         assertEquals(1, useCase.messages.size)
     }
 

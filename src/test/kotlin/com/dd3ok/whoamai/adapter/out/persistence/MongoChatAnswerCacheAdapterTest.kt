@@ -21,7 +21,7 @@ class MongoChatAnswerCacheAdapterTest {
         val template = Mockito.mock(ReactiveMongoTemplate::class.java)
         val indexOps = Mockito.mock(ReactiveIndexOperations::class.java)
         Mockito.`when`(template.indexOps(ChatAnswerCacheDocument::class.java)).thenReturn(indexOps)
-        Mockito.`when`(indexOps.ensureIndex(Mockito.any(IndexDefinition::class.java))).thenReturn(Mono.never())
+        Mockito.`when`(indexOps.createIndex(Mockito.any(IndexDefinition::class.java))).thenReturn(Mono.never())
 
         val adapter = MongoChatAnswerCacheAdapter(template, indexSetupTimeoutMs = 20L)
         assertNull(adapter.find("missing-key"))
@@ -42,7 +42,7 @@ class MongoChatAnswerCacheAdapterTest {
         val template = Mockito.mock(ReactiveMongoTemplate::class.java)
         val indexOps = Mockito.mock(ReactiveIndexOperations::class.java)
         Mockito.`when`(template.indexOps(ChatAnswerCacheDocument::class.java)).thenReturn(indexOps)
-        Mockito.`when`(indexOps.ensureIndex(Mockito.any(IndexDefinition::class.java)))
+        Mockito.`when`(indexOps.createIndex(Mockito.any(IndexDefinition::class.java)))
             .thenReturn(Mono.error(CancellationException("caller cancelled")))
 
         val adapter = MongoChatAnswerCacheAdapter(template, indexSetupTimeoutMs = 1_000L)
