@@ -19,10 +19,39 @@ internal fun matchesProjectQuery(
         .any { code -> containsResumeTerm(rawPrompt, code) }
 }
 
-internal fun normalizeResumeQuery(text: String): String =
-    text.lowercase()
+private val COMPAT_CHOSEONG = charArrayOf(
+    'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ',
+    'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
+)
+
+internal fun normalizeResumeQuery(text: String): String {
+    val stripped = text.lowercase()
         .replace(Regex("\\s+"), "")
         .replace(Regex("[^\\p{L}\\p{Nd}]"), "")
+    return composeCompatibilityJamo(stripped)
+}
+
+private fun composeCompatibilityJamo(text: String): String {
+    if (text.length < 2) return text
+    val sb = StringBuilder(text.length)
+    var index = 0
+    while (index < text.length) {
+        val current = text[index]
+        if (index + 1 < text.length) {
+            val choseongIndex = COMPAT_CHOSEONG.indexOf(current)
+            val next = text[index + 1]
+            if (choseongIndex >= 0 && next in '\u314F'..'\u3163') {
+                val syllable = (0xAC00 + (choseongIndex * 21 + (next.code - 0x314F)) * 28).toChar()
+                sb.append(syllable)
+                index += 2
+                continue
+            }
+        }
+        sb.append(current)
+        index += 1
+    }
+    return sb.toString()
+}
 
 /** Keep Latin word boundaries: .NET must not match Kubernetes, nor Java match JavaScript. */
 internal fun containsResumeTerm(query: String, term: String): Boolean {
@@ -41,20 +70,66 @@ internal fun isLikelyOwnDomainQuestion(
     resume: Resume,
     nameFragments: Set<String> = NameFragmentExtractor.extract(resume.name)
 ): Boolean {
-    if (isOwnServiceQuestion(normalizedPrompt)) {
+    if (isOwnServiceQuestion(rawPrompt, normalizedPrompt, resume)) {
         return true
     }
     return isLikelyResumeQuestion(rawPrompt, normalizedPrompt, resume, nameFragments)
 }
 
-internal fun isOwnServiceQuestion(normalizedPrompt: String): Boolean {
+internal fun isOwnServiceQuestion(normalizedPrompt: String): Boolean =
+    evaluateOwnServiceQuestion(normalizedPrompt).matched
+
+internal fun isOwnServiceQuestion(
+    rawPrompt: String,
+    normalizedPrompt: String,
+    resume: Resume
+): Boolean {
+    val match = evaluateOwnServiceQuestion(normalizedPrompt)
+    if (!match.matched) return false
+    if (!match.explicitServiceTarget && hasExplicitNonHostWorkTarget(rawPrompt, normalizedPrompt, resume)) {
+        return false
+    }
+    return true
+}
+
+private data class OwnServiceMatch(
+    val matched: Boolean,
+    val explicitServiceTarget: Boolean
+)
+
+private fun evaluateOwnServiceQuestion(normalizedPrompt: String): OwnServiceMatch {
+    if (VISITOR_OWN_SERVICE_TOKENS.any { normalizedPrompt.contains(it) }) {
+        return OwnServiceMatch(matched = false, explicitServiceTarget = false)
+    }
     val hasNamedServiceTarget = OWN_SERVICE_NAMED_TOKENS.any { normalizedPrompt.contains(it) }
     val hasSelfServiceTarget = SELF_SERVICE_REFERENCE_TOKENS.any { normalizedPrompt.contains(it) }
+    val hasChatArtifactTarget = OWN_CHAT_ARTIFACT_TOKENS.any { normalizedPrompt.contains(it) }
     val hasImplementationIntent = SERVICE_IMPLEMENTATION_KEYWORDS.any { normalizedPrompt.contains(it) }
     val hasServiceIntroIntent = SERVICE_INTRO_KEYWORDS.any { normalizedPrompt.contains(it) }
+    val hasDataOperationIntent = SERVICE_DATA_OPERATION_KEYWORDS.any { normalizedPrompt.contains(it) }
 
-    return (hasNamedServiceTarget && (hasImplementationIntent || hasServiceIntroIntent)) ||
+    val explicitServiceMatch = (hasNamedServiceTarget && (hasImplementationIntent || hasServiceIntroIntent)) ||
         (hasSelfServiceTarget && hasImplementationIntent)
+    val chatArtifactMatch = hasChatArtifactTarget && hasDataOperationIntent
+    return OwnServiceMatch(
+        matched = explicitServiceMatch || chatArtifactMatch,
+        explicitServiceTarget = explicitServiceMatch
+    )
+}
+
+private fun hasExplicitNonHostWorkTarget(
+    rawPrompt: String,
+    normalizedPrompt: String,
+    resume: Resume
+): Boolean {
+    val companyHit = resume.experiences.any { exp ->
+        containsResumeTerm(rawPrompt, exp.company) || exp.aliases.any { containsResumeTerm(rawPrompt, it) }
+    }
+    if (companyHit) return true
+    return resume.projects.any { project ->
+        normalizeResumeQuery(project.title) != "whoamai" &&
+            matchesProjectQuery(rawPrompt, project, normalizedPrompt)
+    }
 }
 
 private fun isLikelyResumeQuestion(
@@ -147,6 +222,7 @@ internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<Strin
     if (nameFragments.any { fragment -> subject.contains(fragment) || fragment.contains(subject) }) return false
     if (OWN_SERVICE_NAMED_TOKENS.any { token -> subject.contains(token) || token.contains(subject) }) return false
     if (SELF_SERVICE_REFERENCE_TOKENS.any { token -> subject == token }) return false
+    if (OWN_CHAT_ARTIFACT_TOKENS.any { subject.contains(it) }) return false
     if (SELF_CONTAINED_PROFILE_KEYWORDS.any { subject.contains(it) }) return false
     if (DOCUMENT_SIGNAL_KEYWORDS.any { subject.contains(it) }) return false
     if (BROAD_CAPABILITY_KEYWORDS.any { subject.contains(it) }) return false
@@ -157,6 +233,7 @@ internal fun hasExternalNamedSubject(rawPrompt: String, nameFragments: Set<Strin
 internal fun isFollowUpQuestion(prompt: String): Boolean {
     val text = stripConversationTransition(prompt)
     val normalized = normalizeResumeQuery(text)
+    if (isOwnServiceQuestion(normalized)) return false
     if (listOf("공부", "작성", "추천").any { normalized.contains(it) }) return false
 
     // Demonstratives refer to prior discourse; a transition ("그럼") alone does not.
@@ -172,7 +249,7 @@ internal fun isFollowUpQuestion(prompt: String): Boolean {
 }
 
 private val WORK_DETAIL_KEYWORDS = listOf("결과", "이유", "기술", "스킬", "스택", "도구", "어려웠")
-private val DISCOURSE_REFERENCE = Regex("^(?:(?:그|이)(?:\\s+|것|거|게|건|때|중|곳|프로젝트|회사)|거기|왜\\s*(?:그|이))")
+private val DISCOURSE_REFERENCE = Regex("^(?:그(?:\\s+|것|거|게|건|때|중|곳|프로젝트|회사)|이(?:것|거|게|건|때|중|곳|\\s*(?:프로젝트|회사))|거기|왜\\s*(?:그|이))")
 
 private fun stripConversationTransition(prompt: String): String =
     prompt.trim().replace(Regex("^(?:(?:그래서|그럼)[\\s,，]*)+"), "")
@@ -186,7 +263,18 @@ private val SELF_SERVICE_REFERENCE_TOKENS = listOf(
 ).map(::normalizeResumeQuery)
 
 private val OWN_SERVICE_NAMED_TOKENS = listOf(
-    "who-am-ai", "whoamai", "이 서비스", "이 앱", "이 챗봇"
+    "who-am-ai", "whoamai", "이 서비스", "이 앱", "이 챗봇", "이 사이트", "이 페이지", "현재 서비스", "지금 서비스"
+).map(::normalizeResumeQuery)
+
+private val VISITOR_OWN_SERVICE_TOKENS = listOf(
+    "내 서비스", "제 서비스", "내 프로젝트", "제 프로젝트", "내 앱", "제 앱", "내 챗봇", "제 챗봇"
+).map(::normalizeResumeQuery)
+
+private val OWN_CHAT_ARTIFACT_TOKENS = listOf(
+    "이 질문", "추천 질문", "예시 질문", "기본 질문", "질문 목록", "질문 데이터",
+    "현재 대화", "지금 대화", "이 대화", "대화 내용", "대화 내역", "대화 기록", "대화 이력",
+    "채팅 내용", "채팅 내역", "채팅 기록", "채팅 이력", "현재 채팅", "이 채팅",
+    "이 답변", "지금 답변", "답변 캐시", "현재 세션"
 ).map(::normalizeResumeQuery)
 
 private val SELF_CONTAINED_PROFILE_KEYWORDS = listOf(
@@ -207,7 +295,18 @@ private val DOCUMENT_SIGNAL_KEYWORDS = listOf(
 
 private val SERVICE_IMPLEMENTATION_KEYWORDS = listOf(
     "기술", "스택", "만들어", "만들었", "구현", "사용", "아키텍처",
-    "프레임워크", "모델", "repo", "레포", "github", "깃허브"
+    "프레임워크", "모델", "repo", "레포", "github", "깃허브",
+    "구조", "동작", "작동", "원리", "방식", "설계", "데이터",
+    "db", "데이터베이스", "mongo", "몽고", "저장", "조회", "가져오", "불러오",
+    "캐시", "캐싱", "세션", "벡터", "임베딩", "검색", "라우팅",
+    "스트리밍", "웹소켓", "websocket", "rag", "프롬프트"
+).map(::normalizeResumeQuery)
+
+private val SERVICE_DATA_OPERATION_KEYWORDS = listOf(
+    "db", "데이터베이스", "mongo", "몽고", "저장", "조회", "가져오", "불러오", "읽어오",
+    "캐시", "캐싱", "어디서", "어디에", "어떻게", "구조", "동작", "작동", "방식", "구현",
+    "세션", "백엔드", "프론트", "프런트", "정적", "하드코딩", "실시간", "스트리밍",
+    "임베딩", "벡터", "rag"
 ).map(::normalizeResumeQuery)
 
 private val SERVICE_INTRO_KEYWORDS = listOf(
