@@ -68,7 +68,7 @@ class ContextRetriever(
             }
         }
         val normalizedPrompt = normalizeResumeQuery(userPrompt)
-        if (isOwnServiceQuestion(normalizedPrompt) || workTopics(userPrompt).isNotEmpty()) return emptyList()
+        if (isOwnServiceQuestion(userPrompt, normalizedPrompt, resume) || workTopics(userPrompt).isNotEmpty()) return emptyList()
         if (!isFollowUpQuestion(userPrompt) &&
             isLikelyOwnDomainQuestion(userPrompt, normalizedPrompt, resume, names) &&
             rules.any { it(RuleContext(normalizedPrompt, names)) != null }
@@ -78,7 +78,7 @@ class ContextRetriever(
         return history.filter { it.role == "user" }.flatMap { message ->
             val normalized = normalizeResumeQuery(message.text)
             when {
-                isOwnServiceQuestion(normalized) -> listOf(ConversationTopic("who-am-ai 구현 정보", listOf("service_profile")))
+                isOwnServiceQuestion(message.text, normalized, resume) -> listOf(ConversationTopic("who-am-ai 구현 정보", listOf("service_profile")))
                 !isLikelyOwnDomainQuestion(message.text, normalized, resume, names) -> emptyList()
                 else -> workTopics(message.text).ifEmpty {
                     rules.mapNotNull { it(RuleContext(normalized, names)) }.map { id ->
@@ -206,7 +206,13 @@ class ContextRetriever(
             chunkType = "service",
             title = "who-am-ai 구현 정보",
             summary = compactCatalogText(listOf(serviceProfile)),
-            keywords = salientKeywords(listOf("who-am-ai", "RAG", "WebSocket", "Prompt"), listOf(serviceProfile))
+            keywords = salientKeywords(
+                listOf(
+                    "who-am-ai", "RAG", "WebSocket", "Prompt",
+                    "현재 서비스", "이 챗봇", "대화 이력", "현재 대화", "질문", "답변 캐시", "DB 조회", "데이터베이스", "MongoDB", "세션"
+                ),
+                listOf(serviceProfile)
+            )
         )
 
         resume.experiences.forEach { exp ->
@@ -263,7 +269,7 @@ class ContextRetriever(
     suspend fun retrieveSourcesByRule(userPrompt: String): List<ResumeSearchResult> {
         val resume = resumeProviderPort.getResume()
         val normalizedQuery = normalizeResumeQuery(userPrompt)
-        if (isOwnServiceQuestion(normalizedQuery)) {
+        if (isOwnServiceQuestion(userPrompt, normalizedQuery, resume)) {
             logger.info("Context retrieved by: Own Service Rule.")
             return listOf(serviceProfileSource())
         }

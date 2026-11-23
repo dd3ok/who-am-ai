@@ -473,6 +473,83 @@ class ContextRetrieverTest {
         assertTrue(sagaEntry.keywords.any { it.equals("Debezium", ignoreCase = true) })
     }
 
+    @Test
+    fun `chat artifact and DB meta questions return service_profile including jamo split typos`() = runTest {
+        for (question in listOf(
+            "이 질문들은 DB에서 가져오나요?",
+            "현재 대화 내용들은 DB를ㅈ ㅗ회하나요?",
+            "추천 질문은 어디서 가져와?"
+        )) {
+            val sources = contextRetriever.retrieveSourcesByRule(question)
+            assertEquals(listOf("service_profile"), sources.map { it.chunkId }, question)
+            val content = sources.single().content
+            assertTrue(content.contains("chat_answer_cache"), question)
+            assertTrue(content.contains("chat_histories"), question)
+            assertTrue(content.contains("resume_chunks_embedding2"), question)
+        }
+    }
+
+    @Test
+    fun `explicit non-host project in chat data question takes precedence over service_profile`() = runTest {
+        val savepoint = Project(title = "savepoint", company = "개인 프로젝트")
+        val savepointId = ChunkIdGenerator.forProject("savepoint")
+        persistencePort.stub(savepointId, "SAVEPOINT_CONTENT")
+        val retriever = ContextRetriever(
+            persistencePort,
+            object : ResumeProviderPort {
+                override fun getResume() = resume.copy(projects = resume.projects + savepoint)
+                override fun isInitialized() = true
+            },
+            ownDomainProfileProvider,
+            metadataFilterEnabled = true
+        )
+
+        val sources = retriever.retrieveSourcesByRule("savepoint는 대화 내용을 DB에 저장하나요?")
+
+        assertEquals(listOf(savepointId), sources.map { it.chunkId })
+    }
+
+    @Test
+    fun `conversationTopics skips previous project for service meta question and keeps service_profile for follow ups`() {
+        val skillsProject = Project(title = "spring-engineering-skills", company = "개인 프로젝트")
+        val retriever = ContextRetriever(
+            persistencePort,
+            object : ResumeProviderPort {
+                override fun getResume() = resume.copy(projects = resume.projects + skillsProject)
+                override fun isInitialized() = true
+            },
+            ownDomainProfileProvider,
+            metadataFilterEnabled = true
+        )
+
+        assertTrue(
+            retriever.conversationTopics(
+                "현재 대화 내용들은 DB를ㅈ ㅗ회하나요?",
+                listOf(com.dd3ok.whoamai.domain.ChatMessage("user", "spring-engineering-skills는 어떤 프로젝트인가요?"))
+            ).isEmpty()
+        )
+
+        val topics = retriever.conversationTopics(
+            "그럼 TTL은 몇 일이야?",
+            listOf(
+                com.dd3ok.whoamai.domain.ChatMessage("user", "spring-engineering-skills는 어떤 프로젝트인가요?"),
+                com.dd3ok.whoamai.domain.ChatMessage("user", "이 질문들은 DB에서 가져오나요?")
+            )
+        )
+        assertTrue(topics.any { it.title == "who-am-ai 구현 정보" && it.sourceIds == listOf("service_profile") })
+    }
+
+    @Test
+    fun `service_profile catalog entry exposes Korean chat and DB keywords`() {
+        val serviceEntry = contextRetriever.portfolioCatalog().first { it.chunkId == "service_profile" }
+        for (keyword in listOf("현재 서비스", "대화 이력", "답변 캐시", "DB 조회", "MongoDB")) {
+            assertTrue(
+                serviceEntry.keywords.any { it.equals(keyword, ignoreCase = true) },
+                "Expected service_profile keyword '$keyword', got: ${serviceEntry.keywords}"
+            )
+        }
+    }
+
     private class FakeResumePersistencePort : ResumePersistencePort {
         private val contents = mutableMapOf<String, String>()
         var vectorResults: List<ResumeSearchResult> = emptyList()

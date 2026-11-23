@@ -22,7 +22,7 @@ class LLMRouter(
         val normalized = normalizeResumeQuery(resolvedPrompt)
         val nameFragments = NameFragmentExtractor.extract(resume.name)
 
-        if (isOwnServiceQuestion(normalized)) {
+        if (isOwnServiceQuestion(resolvedPrompt, normalized, resume)) {
             logger.info("Routing resolved by own-service intent.")
             return recordDecision(
                 RouteDecision(
@@ -66,6 +66,7 @@ class LLMRouter(
         val resume = resumeProviderPort.getResume()
         val names = NameFragmentExtractor.extract(resume.name)
         if ((!quotedAnswer && hasExternalNamedSubject(userPrompt, names)) ||
+            isOwnServiceQuestion(userPrompt, normalized, resume) ||
             NameFragmentExtractor.matches(normalized, names) ||
             explicitTopics(userPrompt, resume).isNotEmpty()
         ) return userPrompt

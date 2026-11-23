@@ -266,6 +266,71 @@ class CareerContextPlannerTest {
         assertTrue(!plan.prompt.useRagPrompt)
     }
 
+    @Test
+    fun `service DB and conversation history questions bypass prior project topic and route to service_profile`() = runTest {
+        val bqmsId = ChunkIdGenerator.forProject("삼성전자 입찰견적관리시스템(BQMS) – MRO 몰/2.0")
+        val bissId = ChunkIdGenerator.forProject("삼성전자로지텍 설치지원시스템(BISS) 개편")
+        val skillsId = ChunkIdGenerator.forProject("spring-engineering-skills")
+        val savepointId = ChunkIdGenerator.forProject("savepoint")
+        val customResume = Resume(
+            name = "유인재",
+            projects = listOf(
+                Project(title = "삼성전자 입찰견적관리시스템(BQMS) – MRO 몰/2.0", aliases = listOf("BQMS")),
+                Project(title = "삼성전자로지텍 설치지원시스템(BISS) 개편", aliases = listOf("BISS")),
+                Project(title = "spring-engineering-skills"),
+                Project(title = "savepoint")
+            )
+        )
+        val provider = object : ResumeProviderPort {
+            override fun getResume(): Resume = customResume
+            override fun isInitialized(): Boolean = true
+        }
+        val planner = CareerContextPlanner(
+            llmRouter = LLMRouter(provider, SimpleMeterRegistry()),
+            contextRetriever = ContextRetriever(
+                resumePersistencePort = ChunkResumePersistencePort(
+                    mapOf(
+                        bqmsId to "BQMS 자료",
+                        bissId to "BISS 자료",
+                        skillsId to "spring-engineering-skills 자료",
+                        savepointId to "savepoint 자료"
+                    )
+                ),
+                resumeProviderPort = provider,
+                ownDomainProfileProvider = OwnDomainProfileProvider(),
+                metadataFilterEnabled = true
+            ),
+            meterRegistry = SimpleMeterRegistry(),
+            conversationTopicPort = ConversationTopicPort { _, _, _ -> error("Should not delegate own-service question to prior project topic") }
+        )
+
+        val baseHistory = listOf(
+            ChatMessage("user", "삼성전자 BQMS와 BISS 개발·운영 경험을 알려주세요"),
+            ChatMessage("model", "BQMS와 BISS 경험 안내"),
+            ChatMessage("user", "spring-engineering-skills는 어떤 프로젝트인가요?"),
+            ChatMessage("model", "spring-engineering-skills 안내")
+        )
+
+        val q3 = "이 질문들은 DB에서 가져오나요?"
+        val plan3 = planner.plan(q3, baseHistory)
+        assertEquals("rule", plan3.retrieval.retrievalPath)
+        assertEquals(listOf("service_profile"), plan3.prompt.sources.map { it.chunkId })
+        assertEquals(q3, plan3.prompt.userPrompt)
+        assertTrue(plan3.prompt.contexts.single().contains("MongoChatAnswerCacheAdapter"))
+
+        val q4 = "현재 대화 내용들은 DB를ㅈ ㅗ회하나요?"
+        for (history in listOf(baseHistory, baseHistory + listOf(ChatMessage("user", q3), ChatMessage("model", "답변 안내")))) {
+            val plan4 = planner.plan(q4, history)
+            assertEquals("rule", plan4.retrieval.retrievalPath)
+            assertEquals(listOf("service_profile"), plan4.prompt.sources.map { it.chunkId })
+            assertEquals(q4, plan4.prompt.userPrompt)
+            assertTrue(plan4.prompt.contexts.single().contains("chat_histories"))
+        }
+
+        val savepointPlan = planner.plan("savepoint는 대화 내용을 DB에 저장하나요?", baseHistory)
+        assertEquals(listOf(savepointId), savepointPlan.prompt.sources.map { it.chunkId })
+    }
+
     private fun plannerWithChunks(
         chunks: Map<String, String>,
         topicPort: ConversationTopicPort = ConversationTopicPort { _, _, _ -> null },

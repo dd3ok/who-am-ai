@@ -396,4 +396,53 @@ class LLMRouterTest {
         assertEquals(QueryType.RESUME_RAG, decision.queryType)
         assertEquals("지마켓", decision.company)
     }
+
+    @Test
+    fun `service DB and chat history questions are not rewritten to previous projects`() = runTest {
+        val skillsResume = resume.copy(
+            projects = listOf(com.dd3ok.whoamai.domain.Project(title = "spring-engineering-skills", company = "개인 프로젝트"))
+        )
+        val router = LLMRouter(
+            resumeProviderPort = object : ResumeProviderPort {
+                override fun getResume(): Resume = skillsResume
+                override fun isInitialized(): Boolean = true
+            },
+            meterRegistry = SimpleMeterRegistry()
+        )
+        val history = listOf(
+            ChatMessage(role = "user", text = "spring-engineering-skills는 어떤 프로젝트인가요?"),
+            ChatMessage(role = "model", text = "Agent Skills 스위트 프로젝트입니다.")
+        )
+
+        for (question in listOf(
+            "이 질문들은 DB에서 가져오나요?",
+            "현재 대화 내용들은 DB를ㅈ ㅗ회하나요?",
+            "추천 질문은 어디서 불러와?",
+            "이 챗봇은 어떻게 동작해?"
+        )) {
+            assertEquals(question, router.resolveQuery(question, history), question)
+            val decision = router.route(question, history)
+            assertEquals(QueryType.RESUME_RAG, decision.queryType, question)
+            assertEquals(null, decision.project, question)
+            assertEquals(null, decision.company, question)
+        }
+    }
+
+    @Test
+    fun `visitor own service DB question stays NON_RAG and determiners follow expected follow-up boundaries`() = runTest {
+        val router = LLMRouter(
+            resumeProviderPort = fakeResumeProvider,
+            meterRegistry = SimpleMeterRegistry()
+        )
+        val history = listOf(ChatMessage(role = "user", text = "지마켓 경력 알려줘"))
+
+        assertEquals(
+            QueryType.NON_RAG,
+            router.route("내 서비스에서도 현재 대화 내용을 DB에 저장하려면 어떻게 해?", history).queryType
+        )
+        org.junit.jupiter.api.Assertions.assertFalse(isFollowUpQuestion("이 질문들은 DB에서 가져오나요?"))
+        org.junit.jupiter.api.Assertions.assertFalse(isFollowUpQuestion("현재 대화 내용들은 DB를ㅈ ㅗ회하나요?"))
+        org.junit.jupiter.api.Assertions.assertTrue(isFollowUpQuestion("이 프로젝트는 어떤 기술 썼어?"))
+        org.junit.jupiter.api.Assertions.assertTrue(isFollowUpQuestion("그 질문은 왜 그렇게 답했어?"))
+    }
 }
